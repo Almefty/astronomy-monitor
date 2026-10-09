@@ -41,35 +41,39 @@ function drawChart(el: HTMLElement, data: NeoData, width: number) {
   const now = Date.now();
   const narrow = width < 520;
   const height = Math.round(Math.min(380, Math.max(260, width * 0.48)));
-  const m = { top: 14, right: narrow ? 12 : 20, bottom: 30, left: 50 };
+  const m = { top: 24, right: narrow ? 12 : 20, bottom: 30, left: 50 };
   const svg = svgRoot(width, height, "Asteroid close approaches: time versus distance from Earth");
   const g = s("g");
   svg.append(g);
 
-  const x = scaleUtc().domain([new Date(data.windowStart), new Date(data.windowEnd)]).range([m.left, width - m.right]);
+  // Inner padding = the largest dot radius, so no dot is clipped at the top or
+  // spills over the axis labels at the left/right edges.
+  const r = scaleSqrt().domain([5, 600]).range([3.5, 12]).clamp(true);
+  const pad = 13;
+  const x = scaleUtc().domain([new Date(data.windowStart), new Date(data.windowEnd)]).range([m.left + pad, width - m.right - pad]);
   const minD = Math.min(...data.approaches.map((a) => a.distLd), 1);
   const y = scaleLog()
     .domain([Math.min(0.1, minD * 0.7), 20])
-    .range([height - m.bottom, m.top]);
-  const r = scaleSqrt().domain([5, 600]).range([3.5, 12]).clamp(true);
+    .range([height - m.bottom - pad, m.top + pad]);
 
   timeAxis(g, x, height - m.bottom, m.top, Math.floor((width - m.left - m.right) / (narrow ? 70 : 90)));
   const ticks = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20].filter((t) => t >= y.domain()[0]! && t <= 20);
-  yAxis(g, y, ticks, (v) => `${v} LD`, m.left, width - m.right);
+  const yLabels = yAxis(g, y, ticks, (v) => `${v} LD`, m.left, width - m.right);
 
-  // Reference distances.
+  // Reference distances (labels are lifted above the dots further down).
+  const overlay: SVGElement[] = [yLabels];
   const refs: [number, string][] = [[1, "Moon’s distance"]];
   if (y.domain()[0]! < GEO_LD) refs.push([GEO_LD, "Geostationary satellites"]);
   for (const [v, label] of refs) {
     const py = Math.round(y(v)) + 0.5;
     g.append(s("line", { class: "ref-line", x1: m.left, x2: width - m.right, y1: py, y2: py }));
-    g.append(s("text", { class: "ref-label", x: width - m.right - 4, y: py - 5, "text-anchor": "end" }, label));
+    overlay.push(s("text", { class: "ref-label halo", x: width - m.right - 4, y: py - 5, "text-anchor": "end" }, label));
   }
 
-  // "Now" marker.
+  // "Now" marker; its label sits above the plot area, clear of the data.
   const nx = Math.round(x(new Date(now))) + 0.5;
-  g.append(s("line", { class: "now-line", x1: nx, x2: nx, y1: m.top, y2: height - m.bottom }));
-  g.append(s("text", { class: "ref-label", x: nx + 5, y: m.top + 10 }, "now"));
+  g.append(s("line", { class: "now-line", x1: nx, x2: nx, y1: m.top - 4, y2: height - m.bottom }));
+  overlay.push(s("text", { class: "ref-label halo", x: nx, y: m.top - 9, "text-anchor": "middle" }, "now"));
 
   // Marks: largest first so small ones stay on top.
   const sorted = [...data.approaches].sort((a, b) => (sizeKm(b) ?? 0) - (sizeKm(a) ?? 0));
@@ -90,6 +94,8 @@ function drawChart(el: HTMLElement, data: NeoData, width: number) {
     points.push({ x: cx, y: cy, tip: tip(a, now), mark: c, href: a.sbdbUrl });
   }
   g.append(marks);
+  // Axis, reference and "now" labels go on top of the dots so they always stay readable.
+  g.append(...overlay);
 
   // Direct labels: the three closest upcoming approaches only.
   const upcoming = data.approaches.filter((a) => new Date(a.time).getTime() >= now).sort((a, b) => a.distLd - b.distLd).slice(0, narrow ? 2 : 4);

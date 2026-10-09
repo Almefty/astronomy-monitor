@@ -45,7 +45,7 @@ export function yAxis(
   x0: number,
   x1: number,
   opts: { side?: "left" | "right"; grid?: boolean } = {},
-) {
+): SVGGElement {
   const ax = s("g", { class: "axis" });
   const side = opts.side ?? "left";
   for (const t of ticks) {
@@ -56,6 +56,7 @@ export function yAxis(
     );
   }
   g.append(ax);
+  return ax;
 }
 
 export interface HoverPoint {
