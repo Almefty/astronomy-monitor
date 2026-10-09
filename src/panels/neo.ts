@@ -157,7 +157,7 @@ function table(data: NeoData): HTMLElement {
       h(
         "table",
         { class: "data-table" },
-        h("thead", null, h("tr", null, ["Object", "Closest approach", "LD", "km", "km/s", "H", "Size", "PHA"].map((t) => h("th", null, t)))),
+        h("thead", null, h("tr", null, ["Object", "Closest approach", "LD", "km", "km/s", "H", "Size", "PHA"].map((t, i) => h("th", i >= 2 && i <= 5 ? { class: "num", scope: "col" } : { scope: "col" }, t)))),
         h("tbody", null, rows),
       ),
     ),

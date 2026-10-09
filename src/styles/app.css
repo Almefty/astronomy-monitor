@@ -156,9 +156,8 @@ a:hover {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: color-mix(in srgb, var(--page) 88%, transparent);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  /* Fallback without backdrop-filter: nearly opaque so nothing shows through. */
+  background: color-mix(in srgb, var(--page) 97%, transparent);
   border-bottom: 1px solid var(--line);
 }
 .topbar-inner {
@@ -790,6 +789,25 @@ a:hover {
   background: var(--panel-2);
   font-weight: 600;
   color: var(--ink-2);
+}
+/* Frosted glass: heavy blur + enough opacity that content behind is never legible. */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .topbar {
+    background: color-mix(in srgb, var(--page) 80%, transparent);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+  }
+}
+/* Every column but the first (name) shrinks to its content; the name column absorbs spare width. */
+.data-table th:not(:first-child),
+.data-table td:not(:first-child) {
+  width: 1%;
+}
+.data-table th.num {
+  text-align: right;
+}
+.data-table td {
+  font-variant-numeric: tabular-nums;
 }
 .data-table td.num {
   text-align: right;

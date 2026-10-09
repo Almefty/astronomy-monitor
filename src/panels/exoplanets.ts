@@ -381,7 +381,7 @@ function recentTable(recent: NewPlanet[]): HTMLElement {
       h(
         "table",
         { class: "data-table" },
-        h("thead", null, h("tr", null, ["Planet", "Added", "Method", "Radius R⊕", "Mass M⊕", "Period d", "Temp K", "Distance"].map((t) => h("th", null, t)))),
+        h("thead", null, h("tr", null, ["Planet", "Added", "Method", "Radius R⊕", "Mass M⊕", "Period d", "Temp K", "Distance"].map((t, i) => h("th", i >= 3 ? { class: "num", scope: "col" } : { scope: "col" }, t)))),
         h(
           "tbody",
           null,
@@ -396,7 +396,7 @@ function recentTable(recent: NewPlanet[]): HTMLElement {
               h("td", { class: "num" }, p.massEarth !== null ? fmt.sig(p.massEarth, 3) : "—"),
               h("td", { class: "num" }, p.periodDays !== null ? fmt.sig(p.periodDays, 4) : "—"),
               h("td", { class: "num" }, p.eqTempK !== null ? fmt.int(p.eqTempK) : "—"),
-              h("td", { class: "num" }, lightYears(p.distPc)),
+              h("td", { class: "num" }, p.distPc !== null ? lightYears(p.distPc) : "—"),
             ),
           ),
         ),
