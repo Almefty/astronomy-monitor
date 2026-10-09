@@ -1,5 +1,7 @@
 # Astronomy Monitor
 
+**Live:** https://astronomy-monitor.almefty.workers.dev
+
 A one-page dashboard showing what is happening in the sky right now:
 
 | Panel | What you see | Source |
@@ -109,13 +111,17 @@ Ready-made hooks for the v2 ideas:
 | `npm run build` | Production build into `dist/` |
 | `npm run check` | All three of the above |
 
-## Deploying (later)
+## Deployment
 
-Not done yet, on purpose. When you're ready, Claude will walk you through it step by step, mostly in the Cloudflare dashboard (connect a GitHub repository under *Workers & Pages*, then add `NASA_API_KEY` under *Settings → Variables and Secrets* as a **Secret**).
+Live at **https://astronomy-monitor.almefty.workers.dev** (Cloudflare Workers, free plan).
+
+- **Code:** private GitHub repository `Almefty/astronomy-monitor`. Cloudflare Workers Builds is connected to it: every push to `main` rebuilds (`npm run build`) and redeploys (`npx wrangler deploy`) automatically, usually within a minute or two.
+- **Secret:** `NASA_API_KEY` is stored as a Worker **Secret** under *Workers & Pages → astronomy-monitor → Settings → Variables and Secrets* (Production). To change it, edit it there and deploy; no code change is needed.
+- **Build status and logs:** *Workers & Pages → astronomy-monitor → Deployments*.
 
 ## Known limitations
 
-- **DONKI may be unreachable from your own network** (CCMC blocks some networks), so the solar panel only shows live data once deployed. Locally, use the clearly marked saved sample.
+- **DONKI may be unreachable from your own network** (CCMC blocks some networks), so locally the solar panel can't load live data; the deployed site does. Locally, use the clearly marked saved sample.
 - CME positions on the "in transit" map assume constant speed; real CMEs speed up or slow down. Earth-arrival times and Kp ranges are WSA-ENLIL model output, not certainties.
 - Asteroid sizes are estimated from brightness unless JPL has a measurement (it rarely does for small objects).
 - Exoplanet radii for non-transiting planets are often estimated by the archive from mass. That creates the horizontal "stripe" of giant planets near 13 R⊕.

@@ -32,9 +32,15 @@ Status: `[x]` done · `[~]` in progress · `[ ]` to do
 - [x] Verified locally in browser: 1440/1200/1000 px, 375/360 px, light + dark, failure isolation
 - [x] README with local run, key setup, architecture and v2 extension points
 
-## Waiting on you
-- [ ] Paste your NASA key into `.dev.vars` (see README) — optional today
-- [ ] Say when you want to deploy (Cloudflare dashboard walkthrough) / create the GitHub repo
+## Deployment
+- [x] Private GitHub repository `Almefty/astronomy-monitor` created and pushed
+- [x] Connected to Cloudflare Workers Builds (auto-deploy on push to `main`)
+- [x] `NASA_API_KEY` added as a Worker secret (DEMO_KEY notice gone on the live site)
+- [x] Live at https://astronomy-monitor.almefty.workers.dev; all four panels verified with live data, including DONKI
+- [x] Fix: close-approach chart headroom and label readability (verified live)
+
+## Optional for you
+- [ ] Paste your NASA key into `.dev.vars` for local development (see README)
 
 ## Later versions (structure prepared, not built)
 - [ ] Cosmic explosions (NASA GCN Circulars) on an all-sky map
