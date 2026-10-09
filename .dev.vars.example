@@ -1,0 +1,3 @@
+# Copy of the local secrets file, for reference only. The real file is .dev.vars (gitignored).
+NASA_API_KEY=
+APP_ENV=development

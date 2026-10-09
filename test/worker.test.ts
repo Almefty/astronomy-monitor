@@ -1,0 +1,125 @@
+import { describe, expect, it } from "vitest";
+import { cleanExplanation, fromBasic, isPlaceholderLegacy, sizedImage } from "../worker/sources/apod";
+import { diameterFromH, jdToIso, parseCad } from "../worker/sources/neo";
+import { flareFlux, gScale, parseCmes, parseFlares, parseStorms } from "../worker/sources/solar";
+import { redactUrl } from "../worker/lib/upstream";
+import { htmlToText } from "../worker/lib/util";
+import donki from "./fixtures/donki-2026-10-09.json";
+
+describe("secrets", () => {
+  it("redacts API keys from recorded URLs", () => {
+    const out = redactUrl("https://api.nasa.gov/planetary/apod?api_key=abc123SECRET&date=2026-10-09");
+    expect(out).not.toContain("abc123SECRET");
+    expect(out).toContain("api_key=***");
+  });
+});
+
+describe("JPL close approaches", () => {
+  const cad = {
+    count: 2,
+    fields: ["des", "orbit_id", "jd", "cd", "dist", "dist_min", "dist_max", "v_rel", "v_inf", "t_sigma_f", "h", "diameter", "diameter_sigma", "fullname"],
+    data: [
+      ["2026 TB3", "2", "2461322.700346706", "2026-Oct-09 04:48", "0.00430879907752479", "0.00427813012904407", "0.00433946374935701", "11.0612830679976", "11.0052", "< 00:01", "28.516", null, null, "       (2026 TB3)"],
+      ["99942", "220", "2462240.407091595", "2029-Apr-13 21:46", "0.000254099", "0.000254", "0.000254", "7.42", "5.84", "< 00:01", "19.09", "0.34", null, "  99942 Apophis (2004 MN4)"],
+    ],
+  };
+  const rows = parseCad(cad, new Set(["99942"]));
+
+  it("converts Julian dates and distances", () => {
+    expect(jdToIso(2440587.5)).toBe("1970-01-01T00:00:00.000Z");
+    expect(rows[0]!.time.startsWith("2026-10-09T04:48")).toBe(true);
+    expect(rows[0]!.distLd).toBeCloseTo(1.677, 2);
+    expect(rows[0]!.name).toBe("(2026 TB3)");
+  });
+
+  it("flags PHAs and keeps measured diameters", () => {
+    expect(rows[1]!.pha).toBe(true);
+    expect(rows[1]!.diameterKm).toBe(0.34);
+    expect(rows[0]!.pha).toBe(false);
+  });
+
+  it("estimates size from absolute magnitude", () => {
+    const d = diameterFromH(22);
+    expect(d.min).toBeGreaterThan(0.09);
+    expect(d.max).toBeLessThan(0.28);
+    expect(d.min).toBeLessThan(d.max);
+  });
+});
+
+describe("DONKI solar activity", () => {
+  it("parses GOES flare classes into flux", () => {
+    expect(flareFlux("M6.7")).toEqual({ letter: "M", flux: 6.7e-5 });
+    expect(flareFlux("X1")!.flux).toBeCloseTo(1e-4);
+    expect(flareFlux("nonsense")).toBeNull();
+  });
+
+  it("maps Kp to the NOAA G-scale", () => {
+    expect([4.67, 5, 5.67, 6.33, 7, 8, 9].map(gScale)).toEqual([0, 1, 1, 2, 3, 4, 5]);
+  });
+
+  it("parses real flares", () => {
+    const flares = parseFlares(donki.FLR as never);
+    expect(flares).toHaveLength(10);
+    const biggest = flares.reduce((a, b) => (b.flux > a.flux ? b : a));
+    expect(biggest.classType).toBe("M6.7");
+    expect(biggest.linkedIds).toContain("2026-10-08T16:53:00-CME-001");
+  });
+
+  it("uses the newest most-accurate CME analysis and classifies Earth impacts", () => {
+    const cmes = parseCmes(donki.CME as never);
+    const byId = new Map(cmes.map((c) => [c.id, c]));
+    // Two analyses flagged most-accurate: the later one (lon 0, speed 573) wins.
+    const direct = byId.get("2026-10-06T06:23:00-CME-001")!;
+    expect(direct.lon).toBe(0);
+    expect(direct.speed).toBe(573);
+    expect(direct.earth).toMatchObject({ arrival: "2026-10-09T02:21:00.000Z", glancingBlow: false, kpMin: 4, kpMax: 7 });
+    // isEarthMinorImpact counts as a glancing blow.
+    expect(byId.get("2026-10-06T09:53:00-CME-001")!.earth?.glancingBlow).toBe(true);
+    // Far-side CME: no Earth impact.
+    expect(byId.get("2026-10-08T16:12:00-CME-001")!.earth).toBeNull();
+  });
+
+  it("parses geomagnetic storms", () => {
+    const [storm] = parseStorms(donki.GST as never);
+    expect(storm!.maxKp).toBeCloseTo(5.67);
+    expect(storm!.gScale).toBe(1);
+  });
+});
+
+describe("APOD", () => {
+  it("detects the legacy API's placeholder records", () => {
+    expect(
+      isPlaceholderLegacy({
+        date: "2026-10-08", title: "NASA Science", explanation: "", media_type: "image",
+        url: "https://science.nasa.gov/wp-content/themes/nasa-child/assets/images/nasa-logo@2x.png",
+      }),
+    ).toBe(true);
+  });
+
+  it("cleans explanations", () => {
+    const html = "<strong>Explanation:</strong> A <a href='x'>moon</a> &amp; a crater.<br><br><strong>Tomorrow&#8217;s picture: </strong>farside";
+    expect(cleanExplanation(html)).toBe("A moon & a crater.");
+    expect(htmlToText("Sm&ouml;rg&aring;sbord &#8211; ok")).toContain("–");
+  });
+
+  it("resizes NASA dynamic images only", () => {
+    const u = "https://assets.science.nasa.gov/dynamicimage/assets/x.jpg?w=1836&h=1362&fit=clip";
+    expect(sizedImage(u, "thumb")).toBe("https://assets.science.nasa.gov/dynamicimage/assets/x.jpg?w=480&h=320&fit=crop");
+    expect(sizedImage("https://example.org/a.jpg?w=1", "thumb")).toBe("https://example.org/a.jpg?w=1");
+  });
+
+  it("handles video days (mp4 and YouTube) and placeholder posters", () => {
+    const base = { date: "2026-04-22", title: "Earthset", permalink: "p", explanation: "", media_type: "video" };
+    const yt = fromBasic({
+      ...base,
+      hdurl: "https://assets.science.nasa.gov/dynamicimage/assets/science/astro/programs/cosmic-origins/images/misc/news-thumbnail.png?w=594",
+      basic_html: '<iframe src="//www.youtube.com/embed/MT8tg5b3b8E?rel=0"></iframe>',
+    });
+    expect(yt.videoKind).toBe("embed");
+    expect(yt.videoUrl).toBe("https://www.youtube.com/embed/MT8tg5b3b8E?rel=0");
+    expect(yt.imageUrl).toContain("img.youtube.com/vi/MT8tg5b3b8E");
+    const mp4 = fromBasic({ ...base, hdurl: null, basic_html: '<video><source src="https://assets.science.nasa.gov/content/dam/a.mp4"></video>' });
+    expect(mp4.videoKind).toBe("file");
+    expect(mp4.imageUrl).toBeNull();
+  });
+});

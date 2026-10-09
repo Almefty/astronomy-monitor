@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "astronomy-monitor",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  // Static frontend (built by Vite) is served from Cloudflare's asset store for free;
+  // only /api/* requests run the Worker.
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true },
+  // Non-secret configuration. The NASA key is NOT here: it is a Worker secret
+  // (NASA_API_KEY) set in the Cloudflare dashboard, and in .dev.vars locally.
+  "vars": { "APP_ENV": "production" }
+}

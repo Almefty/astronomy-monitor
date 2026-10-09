@@ -1,0 +1,112 @@
+/*
+ * Design tokens. Light is the default; dark is a separately selected set (not an inversion).
+ * Data colours: first three slots of the validated categorical palette
+ * (validated all-pairs against these exact panel surfaces) plus a neutral "other".
+ * Status colours (good/warning/serious/critical) are reserved for severity and always
+ * appear with a text label.
+ */
+:root {
+  color-scheme: light;
+  --page: #e4e9f0;
+  --panel: #ffffff;
+  --panel-2: #f1f4f8;
+  --line: rgba(13, 22, 38, 0.1);
+  --line-strong: rgba(13, 22, 38, 0.2);
+  --ink: #0b1220;
+  --ink-2: #435064;
+  --ink-3: #687487;
+  --grid: #e2e7ee;
+  --axis: #c3cbd6;
+
+  --series-1: #2a78d6;
+  --series-1-wash: rgba(42, 120, 214, 0.1);
+  --series-2: #eb6834;
+  --series-2-wash: rgba(235, 104, 52, 0.12);
+  --series-3: #1baf7a;
+  --other: #a3abb5;
+
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+
+  --sun: #f2a516;
+  --focus: #2a78d6;
+  --primary-bg: #0b1220;
+  --primary-ink: #ffffff;
+  --notice-bg: #fff4d6;
+  --notice-ink: #5a4100;
+  --notice-line: #f0d68a;
+  --error-bg: #fdecec;
+  --error-ink: #7a1c1c;
+  --shadow: 0 1px 2px rgba(13, 22, 38, 0.06), 0 8px 24px -12px rgba(13, 22, 38, 0.18);
+
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-cond: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --gutter: 16px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #05080d;
+    --panel: #0d131c;
+    --panel-2: #131b26;
+    --line: rgba(255, 255, 255, 0.08);
+    --line-strong: rgba(255, 255, 255, 0.16);
+    --ink: #e8eef6;
+    --ink-2: #a5b2c2;
+    --ink-3: #7a879a;
+    --grid: #19222e;
+    --axis: #2c3747;
+    --series-1: #3987e5;
+    --series-1-wash: rgba(57, 135, 229, 0.14);
+    --series-2: #d95926;
+    --series-2-wash: rgba(217, 89, 38, 0.16);
+    --series-3: #199e70;
+    --other: #5a6574;
+    --sun: #f5b52e;
+    --focus: #6aa8f0;
+    --primary-bg: #e8eef6;
+    --primary-ink: #05080d;
+    --notice-bg: #2a2310;
+    --notice-ink: #f3d98c;
+    --notice-line: #4d3f14;
+    --error-bg: #2a1214;
+    --error-ink: #f2b8b8;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px -16px rgba(0, 0, 0, 0.7);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #05080d;
+  --panel: #0d131c;
+  --panel-2: #131b26;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --ink: #e8eef6;
+  --ink-2: #a5b2c2;
+  --ink-3: #7a879a;
+  --grid: #19222e;
+  --axis: #2c3747;
+  --series-1: #3987e5;
+  --series-1-wash: rgba(57, 135, 229, 0.14);
+  --series-2: #d95926;
+  --series-2-wash: rgba(217, 89, 38, 0.16);
+  --series-3: #199e70;
+  --other: #5a6574;
+  --sun: #f5b52e;
+  --focus: #6aa8f0;
+  --primary-bg: #e8eef6;
+  --primary-ink: #05080d;
+  --notice-bg: #2a2310;
+  --notice-ink: #f3d98c;
+  --notice-line: #4d3f14;
+  --error-bg: #2a1214;
+  --error-ink: #f2b8b8;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px -16px rgba(0, 0, 0, 0.7);
+}
