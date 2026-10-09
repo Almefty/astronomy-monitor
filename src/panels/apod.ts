@@ -45,7 +45,7 @@ function media(e: ApodEntry): HTMLElement {
 
 function entryView(e: ApodEntry): HTMLElement {
   const text = h("p", { class: "apod-text" }, e.explanation);
-  const more = h("button", { class: "btn btn-quiet", type: "button", "aria-expanded": "false" }, "Read more");
+  const more = h("button", { class: "btn btn-quiet apod-more", type: "button", "aria-expanded": "false" }, "Read more");
   more.addEventListener("click", () => {
     const open = text.classList.toggle("is-open");
     more.textContent = open ? "Show less" : "Read more";
@@ -64,8 +64,8 @@ function entryView(e: ApodEntry): HTMLElement {
       "div",
       { class: "apod-links" },
       more,
-      hd ? h("a", { class: "btn", href: hd, target: "_blank", rel: "noopener" }, "Full resolution", icon(ICONS.external)) : null,
-      page ? h("a", { class: "btn", href: page, target: "_blank", rel: "noopener" }, "View on NASA", icon(ICONS.external)) : null,
+      hd ? h("a", { class: "btn apod-ext", href: hd, target: "_blank", rel: "noopener" }, "Full resolution", icon(ICONS.external)) : null,
+      page ? h("a", { class: "btn apod-ext", href: page, target: "_blank", rel: "noopener" }, "View on NASA", icon(ICONS.external)) : null,
     ),
   );
 }

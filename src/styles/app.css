@@ -1119,6 +1119,32 @@ a:hover {
   }
 }
 
+/* Phones: "Read more" becomes a text toggle on its own line; the two links share a row
+   as equal-width buttons, or stack full-width when a row can't fit both. */
+@media (max-width: 640px) {
+  .apod-links {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+  .apod-more {
+    grid-column: 1 / -1;
+    justify-self: start;
+    height: auto;
+    padding: 2px 0;
+    background: none;
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: var(--line-strong);
+  }
+  .apod-more:hover {
+    background: none;
+  }
+  .apod-ext {
+    justify-content: center;
+  }
+}
+
 @media (max-width: 400px) {
   .app-label {
     font-size: 14px;
