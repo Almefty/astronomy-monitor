@@ -228,11 +228,13 @@ function drawHeliosphere(el: HTMLElement, data: SolarData, width: number) {
   const g = s("g");
   svg.append(g);
 
+  const orbitLabels: SVGTextElement[] = [];
   // Orbits (planets are not drawn at their real positions; only the distances matter here).
   for (const [au, name] of [[0.387, "Mercury"], [0.723, "Venus"], [1, "Earth’s orbit (1 au)"]] as [number, string][]) {
     g.append(s("circle", { cx: c, cy: c, r: au * auPx, fill: "none", stroke: au === 1 ? "var(--axis)" : "var(--grid)", "stroke-width": au === 1 ? 1.5 : 1 }));
-    // Labels sit on top of each orbit (CMEs mostly travel towards the right half).
-    g.append(s("text", { class: "axis-label", x: c, y: c - au * auPx - 4, "text-anchor": "middle" }, name));
+    // Labels sit just above the top of each orbit, clear of the line. They are added after the
+    // CME arcs (below) with a halo, so arcs crossing them never make them unreadable.
+    orbitLabels.push(s("text", { class: "axis-label halo", x: c, y: c - au * auPx - 9, "text-anchor": "middle" }, name));
   }
 
   // Leading edge of each recent CME with a known direction.
@@ -273,6 +275,8 @@ function drawHeliosphere(el: HTMLElement, data: SolarData, width: number) {
       tip: { ...cmeTip(cm), note: `Estimated front ≈ ${fmt.fixed(r, 2)} au from the Sun now (constant speed).${cm.earth ? " Modelled to reach Earth." : ""}` },
     });
   }
+
+  g.append(...orbitLabels);
 
   // Sun and Earth.
   g.append(s("circle", { cx: c, cy: c, r: 7, fill: "var(--sun)" }));
