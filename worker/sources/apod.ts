@@ -2,7 +2,7 @@ import type { ApodData, ApodEntry } from "../../shared/contract";
 import { nasaKey } from "../lib/env";
 import type { Upstream } from "../lib/upstream";
 import { SourceError } from "../lib/upstream";
-import { addDays, htmlToText, isoDate } from "../lib/util";
+import { addDays, decodeEntities, htmlToText, isoDate } from "../lib/util";
 import type { SourceModule } from "./types";
 
 /**
@@ -13,6 +13,8 @@ import type { SourceModule } from "./types";
  * only used as a validated fallback.
  */
 const APOD_BASIC = "https://science.nasa.gov/wp-json/wp/v2/apod-basic";
+/** Official APOD RSS feed (last 30 days). Same fields as apod-basic; used when the JSON API is unavailable. */
+const APOD_FEED = "https://science.nasa.gov/feed/apod-basic/";
 const APOD_LEGACY = "https://api.nasa.gov/planetary/apod";
 const RECENT_DAYS = 10;
 
@@ -125,6 +127,60 @@ async function loadBasic(upstream: Upstream, now: Date): Promise<ApodEntry[]> {
   return rows.map(fromBasic).sort((a, b) => b.date.localeCompare(a.date));
 }
 
+/** Text of the first <tag>…</tag> in an XML fragment, CDATA unwrapped and entities decoded. */
+function xmlField(xml: string, tag: string): string {
+  const m = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`).exec(xml);
+  if (!m) return "";
+  const cdata = /^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/.exec(m[1]!);
+  return cdata ? cdata[1]! : decodeEntities(m[1]!.trim());
+}
+
+/** APOD date of a feed item: the discussion link carries it (date=YYMMDD); fall back to the slug, then pubDate. */
+export function feedItemDate(item: string): string | null {
+  const disc = /date=(\d{2})(\d{2})(\d{2})/.exec(xmlField(item, "apod:discussion"));
+  if (disc) return `20${disc[1]}-${disc[2]}-${disc[3]}`;
+  const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+  const slug = /apod-(\d{4})-([a-z]+)-(\d{1,2})-/.exec(xmlField(item, "link"));
+  if (slug && MONTHS.includes(slug[2]!)) {
+    return `${slug[1]}-${String(MONTHS.indexOf(slug[2]!) + 1).padStart(2, "0")}-${slug[3]!.padStart(2, "0")}`;
+  }
+  const pub = new Date(xmlField(item, "pubDate"));
+  return Number.isNaN(pub.getTime()) ? null : isoDate(pub);
+}
+
+/** Parse the APOD RSS feed into the same raw shape as apod-basic, so fromBasic() handles both. */
+export function parseFeed(xml: string, max = Infinity): RawBasic[] {
+  const out: RawBasic[] = [];
+  for (const [, item] of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+    if (out.length >= max) break; // newest first; stop early to stay well within the Worker CPU budget
+    const date = feedItemDate(item!);
+    if (!date) continue;
+    const body = xmlField(item!, "content:encoded") || xmlField(item!, "description");
+    out.push({
+      date,
+      title: xmlField(item!, "title"),
+      permalink: xmlField(item!, "link"),
+      media_type: /<(video|iframe)\b/i.test(body) ? "video" : "image",
+      explanation: xmlField(item!, "apod:explanation"),
+      credit: xmlField(item!, "apod:credit"),
+      copyright: xmlField(item!, "apod:copyright"),
+      alt: xmlField(item!, "apod:alt"),
+      hdurl: xmlField(item!, "apod:hdurl") || null,
+      basic_html: body,
+    });
+  }
+  return out;
+}
+
+async function loadFeed(upstream: Upstream): Promise<ApodEntry[]> {
+  const xml = await upstream.text("APOD (science.nasa.gov RSS feed)", APOD_FEED, {
+    headers: { accept: "application/rss+xml, application/xml;q=0.9, */*;q=0.5" },
+  });
+  const rows = parseFeed(xml, RECENT_DAYS);
+  if (rows.length === 0) throw new SourceError("parse", "The APOD RSS feed contained no entries.");
+  return rows.map(fromBasic).sort((a, b) => b.date.localeCompare(a.date));
+}
+
 async function loadLegacy(upstream: Upstream, key: string, now: Date): Promise<ApodEntry[]> {
   const q = new URLSearchParams({ api_key: key, start_date: isoDate(addDays(now, -RECENT_DAYS)), thumbs: "true" });
   const rows = await upstream.json<RawLegacy[]>("APOD (api.nasa.gov, legacy)", `${APOD_LEGACY}?${q}`, { timeoutMs: 20_000 });
@@ -142,24 +198,31 @@ export const apodSource: SourceModule<"apod"> = {
   docsUrl: "https://science.nasa.gov/apod/",
 
   async load({ upstream, env, now, notices }) {
+    // 1) JSON API  2) official RSS feed (same data; the JSON API is sometimes behind a
+    // JavaScript browser check)  3) legacy api.nasa.gov, accepted only if it isn't placeholder data.
     let entries: ApodEntry[];
     let via: ApodData["via"] = "science.nasa.gov";
     try {
       entries = await loadBasic(upstream, now);
-    } catch (primaryErr) {
-      const { key, mode } = nasaKey(env);
+    } catch (jsonErr) {
       try {
-        entries = await loadLegacy(upstream, key, now);
-        via = "api.nasa.gov";
-        notices.push({
-          level: "warning",
-          text: `science.nasa.gov was unavailable (${(primaryErr as Error).message}); showing the legacy api.nasa.gov feed${mode === "demo" ? " via DEMO_KEY" : ""}.`,
-        });
-      } catch (fallbackErr) {
-        throw new SourceError(
-          "upstream",
-          `APOD unavailable. science.nasa.gov: ${(primaryErr as Error).message} · api.nasa.gov: ${(fallbackErr as Error).message}`,
-        );
+        entries = await loadFeed(upstream);
+        notices.push({ level: "info", text: "Loaded from NASA's official APOD RSS feed (the science.nasa.gov JSON API is currently unavailable)." });
+      } catch (feedErr) {
+        const { key, mode } = nasaKey(env);
+        try {
+          entries = await loadLegacy(upstream, key, now);
+          via = "api.nasa.gov";
+          notices.push({
+            level: "warning",
+            text: `science.nasa.gov was unavailable (${(jsonErr as Error).message}); showing the legacy api.nasa.gov feed${mode === "demo" ? " via DEMO_KEY" : ""}.`,
+          });
+        } catch (legacyErr) {
+          throw new SourceError(
+            "upstream",
+            `APOD unavailable. science.nasa.gov JSON: ${(jsonErr as Error).message} · RSS feed: ${(feedErr as Error).message} · api.nasa.gov: ${(legacyErr as Error).message}`,
+          );
+        }
       }
     }
     const data: ApodData = { via, today: entries[0]!, recent: entries.slice(0, 8) };

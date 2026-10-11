@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanExplanation, fromBasic, isPlaceholderLegacy, sizedImage } from "../worker/sources/apod";
+import { cleanExplanation, feedItemDate, fromBasic, isPlaceholderLegacy, parseFeed, sizedImage } from "../worker/sources/apod";
 import { diameterFromH, jdToIso, parseCad } from "../worker/sources/neo";
 import { flareFlux, gScale, parseCmes, parseFlares, parseStorms } from "../worker/sources/solar";
 import { redactUrl } from "../worker/lib/upstream";
@@ -122,4 +122,31 @@ describe("APOD", () => {
     expect(mp4.videoKind).toBe("file");
     expect(mp4.imageUrl).toBeNull();
   });
+
+  it("parses the official RSS feed (image and video items)", () => {
+    const xml = `<rss><channel>
+<item><title>Ice Fishing for Cosmic Neutrinos</title>
+<link>https://science.nasa.gov/image-article/apod-2026-october-11-ice-fishing-for-cosmic-neutrinos/</link>
+<pubDate>Sun, 11 Oct 2026 04:05:00 +0000</pubDate>
+<apod:hdurl>https://assets.science.nasa.gov/dynamicimage/assets/x/deephole.jpg?w=0&#038;h=0&#038;fit=clip</apod:hdurl>
+<apod:discussion>https://asterisk.apod.com/discuss_apod.php?date=261011</apod:discussion>
+<apod:credit><![CDATA[<a href="https://www.nsf.gov/">NSF</a>, B. Gudbjartsson]]></apod:credit>
+<apod:alt>A dark cable descends into a hole of ice.</apod:alt>
+<apod:explanation><![CDATA[<strong>Explanation:</strong> Scientists are melting holes. <br><br><strong>Tomorrow's picture:</strong> x]]></apod:explanation>
+<content:encoded><![CDATA[<p><img src="x.jpg"></p>]]></content:encoded></item>
+<item><title>Comet NEOWISE Rising</title>
+<link>https://science.nasa.gov/image-article/apod-2026-september-13-comet-neowise-rising/</link>
+<pubDate>Sun, 13 Sep 2026 04:05:00 +0000</pubDate>
+<apod:hdurl>https://assets.science.nasa.gov/dynamicimage/assets/x/Comet_snapshot.png?w=1080</apod:hdurl>
+<content:encoded><![CDATA[<video controls><source src="https://assets.science.nasa.gov/content/dam/a.mp4"></video>]]></content:encoded></item>
+</channel></rss>`;
+    const [img, vid] = parseFeed(xml).map(fromBasic);
+    expect(img).toMatchObject({ date: "2026-10-11", title: "Ice Fishing for Cosmic Neutrinos", mediaType: "image", credit: "NSF, B. Gudbjartsson" });
+    expect(img!.explanation).toBe("Scientists are melting holes.");
+    expect(img!.hdUrl).toBe("https://assets.science.nasa.gov/dynamicimage/assets/x/deephole.jpg?w=0&h=0&fit=clip");
+    expect(vid).toMatchObject({ date: "2026-09-13", mediaType: "video", videoKind: "file" });
+    // No discussion link: the date comes from the slug.
+    expect(feedItemDate("<link>https://science.nasa.gov/image-article/apod-2026-september-3-x/</link>")).toBe("2026-09-03");
+  });
 });
+
