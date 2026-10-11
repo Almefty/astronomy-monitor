@@ -181,6 +181,24 @@ async function loadFeed(upstream: Upstream): Promise<ApodEntry[]> {
   return rows.map(fromBasic).sort((a, b) => b.date.localeCompare(a.date));
 }
 
+/** Today's APOD date. APOD posts at about 00:05 US Eastern, so "today" is the New York calendar date. */
+export function apodToday(now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}
+
+const shortDate = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+/** Short, accurate reason for a failed upstream call, for the panel note. */
+export function describeFailure(err: Error): string {
+  const m = err.message;
+  const status = /HTTP (\d{3})/.exec(m)?.[1];
+  if (status) return `answered HTTP ${status}${/Checking your browser|Javascript required/i.test(m) ? " (a JavaScript browser check)" : ""}`;
+  if (err instanceof SourceError && err.kind === "timeout") return "timed out";
+  if (err instanceof SourceError && err.kind === "unreachable") return "could not be reached";
+  if (err instanceof SourceError && err.kind === "parse") return "returned unusable data";
+  return "failed";
+}
+
 async function loadLegacy(upstream: Upstream, key: string, now: Date): Promise<ApodEntry[]> {
   const q = new URLSearchParams({ api_key: key, start_date: isoDate(addDays(now, -RECENT_DAYS)), thumbs: "true" });
   const rows = await upstream.json<RawLegacy[]>("APOD (api.nasa.gov, legacy)", `${APOD_LEGACY}?${q}`, { timeoutMs: 20_000 });
@@ -198,34 +216,58 @@ export const apodSource: SourceModule<"apod"> = {
   docsUrl: "https://science.nasa.gov/apod/",
 
   async load({ upstream, env, now, notices }) {
-    // 1) JSON API  2) official RSS feed (same data; the JSON API is sometimes behind a
-    // JavaScript browser check)  3) legacy api.nasa.gov, accepted only if it isn't placeholder data.
-    let entries: ApodEntry[];
+    // 1) JSON API  2) official RSS feed (same data)  3) legacy api.nasa.gov, accepted only if it
+    // isn't placeholder data. The feed is also consulted when the JSON API lags behind today's APOD.
+    let entries: ApodEntry[] | null = null;
     let via: ApodData["via"] = "science.nasa.gov";
+    let jsonErr: Error | null = null;
     try {
       entries = await loadBasic(upstream, now);
-    } catch (jsonErr) {
+    } catch (err) {
+      jsonErr = err as Error;
+    }
+
+    const today = apodToday(now);
+    if (entries && entries[0]!.date < today) {
+      // JSON API works but hasn't published today's entry: use the feed if it is newer.
+      try {
+        const feed = await loadFeed(upstream);
+        if (feed[0]!.date > entries[0]!.date) {
+          notices.push({
+            level: "info",
+            text: `From NASA's APOD RSS feed: the science.nasa.gov JSON API's newest entry is still ${shortDate(entries[0]!.date)}, the feed already has ${shortDate(feed[0]!.date)}.`,
+          });
+          entries = feed;
+        }
+      } catch {
+        /* keep the JSON entries; today's APOD may simply not be published yet */
+      }
+    }
+
+    if (!entries) {
+      let feedErr: Error;
       try {
         entries = await loadFeed(upstream);
-        notices.push({ level: "info", text: "Loaded from NASA's official APOD RSS feed (the science.nasa.gov JSON API is currently unavailable)." });
-      } catch (feedErr) {
+        notices.push({ level: "info", text: `From NASA's APOD RSS feed: the science.nasa.gov JSON API ${describeFailure(jsonErr!)}.` });
+      } catch (err) {
+        feedErr = err as Error;
         const { key, mode } = nasaKey(env);
         try {
           entries = await loadLegacy(upstream, key, now);
           via = "api.nasa.gov";
           notices.push({
             level: "warning",
-            text: `science.nasa.gov was unavailable (${(jsonErr as Error).message}); showing the legacy api.nasa.gov feed${mode === "demo" ? " via DEMO_KEY" : ""}.`,
+            text: `science.nasa.gov JSON API ${describeFailure(jsonErr!)} and the RSS feed ${describeFailure(feedErr)}; showing the legacy api.nasa.gov feed${mode === "demo" ? " via DEMO_KEY" : ""}.`,
           });
         } catch (legacyErr) {
           throw new SourceError(
             "upstream",
-            `APOD unavailable. science.nasa.gov JSON: ${(jsonErr as Error).message} · RSS feed: ${(feedErr as Error).message} · api.nasa.gov: ${(legacyErr as Error).message}`,
+            `APOD unavailable. science.nasa.gov JSON: ${jsonErr!.message} · RSS feed: ${feedErr.message} · api.nasa.gov: ${(legacyErr as Error).message}`,
           );
         }
       }
     }
-    const data: ApodData = { via, today: entries[0]!, recent: entries.slice(0, 8) };
+    const data: ApodData = { via, today: entries![0]!, recent: entries!.slice(0, 8) };
     return data;
   },
 };

@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { cleanExplanation, feedItemDate, fromBasic, isPlaceholderLegacy, parseFeed, sizedImage } from "../worker/sources/apod";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { apodSource, apodToday, cleanExplanation, feedItemDate, fromBasic, isPlaceholderLegacy, parseFeed, sizedImage } from "../worker/sources/apod";
+import { Upstream } from "../worker/lib/upstream";
 import { diameterFromH, jdToIso, parseCad } from "../worker/sources/neo";
 import { flareFlux, gScale, parseCmes, parseFlares, parseStorms } from "../worker/sources/solar";
 import { redactUrl } from "../worker/lib/upstream";
@@ -150,3 +151,60 @@ describe("APOD", () => {
   });
 });
 
+
+describe("APOD source selection", () => {
+  const jsonRow = (date: string) => ({ date, title: `JSON ${date}`, permalink: "p", media_type: "image", explanation: "x", hdurl: null, basic_html: "" });
+  const feedXml = (date: string) => {
+    const [y, m, d] = date.split("-");
+    return `<rss><channel><item><title>Feed ${date}</title><link>https://science.nasa.gov/image-article/x/</link>
+<apod:discussion>https://asterisk.apod.com/discuss_apod.php?date=${y!.slice(2)}${m}${d}</apod:discussion>
+<content:encoded><![CDATA[<p>x</p>]]></content:encoded></item></channel></rss>`;
+  };
+  function stub(json: (() => Response) | null, feed: () => Response) {
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (url.includes("/wp-json/")) return json ? json() : new Response("", { status: 500 });
+      if (url.includes("/feed/apod-basic/")) return feed();
+      return new Response("{}", { status: 503 });
+    });
+  }
+  const run = (now: Date) => {
+    const notices: { level: string; text: string }[] = [];
+    return apodSource.load({ env: {} as never, upstream: new Upstream(), params: new URLSearchParams(), now, notices }).then((data) => ({ data, notices }));
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("dates APOD by US Eastern time", () => {
+    expect(apodToday(new Date("2026-10-11T03:00:00Z"))).toBe("2026-10-10"); // 23:00 EDT
+    expect(apodToday(new Date("2026-10-11T06:00:00Z"))).toBe("2026-10-11");
+  });
+
+  it("prefers the RSS feed when the JSON API lags behind today's APOD", async () => {
+    stub(() => Response.json([jsonRow("2026-10-10"), jsonRow("2026-10-09")]), () => new Response(feedXml("2026-10-11")));
+    const { data, notices } = await run(new Date("2026-10-11T06:20:00Z"));
+    expect(data.today.date).toBe("2026-10-11");
+    expect(data.today.title).toBe("Feed 2026-10-11");
+    expect(notices[0]!.text).toMatch(/newest entry is still 10 Oct, the feed already has 11 Oct/);
+    expect(notices[0]!.text).not.toMatch(/unavailable/);
+  });
+
+  it("keeps the JSON API, silently, when it is current", async () => {
+    stub(() => Response.json([jsonRow("2026-10-11")]), () => new Response(feedXml("2026-10-11")));
+    const { data, notices } = await run(new Date("2026-10-11T06:20:00Z"));
+    expect(data.today.title).toBe("JSON 2026-10-11");
+    expect(notices).toHaveLength(0);
+  });
+
+  it("keeps the JSON API when neither source has today's entry yet", async () => {
+    stub(() => Response.json([jsonRow("2026-10-10")]), () => new Response(feedXml("2026-10-10")));
+    const { data, notices } = await run(new Date("2026-10-11T06:20:00Z"));
+    expect(data.today.title).toBe("JSON 2026-10-10");
+    expect(notices).toHaveLength(0);
+  });
+
+  it("names the real reason when the JSON API is blocked", async () => {
+    stub(() => new Response("<!DOCTYPE html><title>Checking your browser...</title>", { status: 403 }), () => new Response(feedXml("2026-10-11")));
+    const { data, notices } = await run(new Date("2026-10-11T06:20:00Z"));
+    expect(data.today.title).toBe("Feed 2026-10-11");
+    expect(notices[0]!.text).toBe("From NASA's APOD RSS feed: the science.nasa.gov JSON API answered HTTP 403 (a JavaScript browser check).");
+  });
+});
