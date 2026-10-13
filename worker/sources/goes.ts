@@ -1,5 +1,5 @@
 import type { GoesData, GoesFlare } from "../../shared/contract";
-import { SourceError } from "../lib/upstream";
+import { SourceError, type Upstream } from "../lib/upstream";
 import type { SourceModule } from "./types";
 
 /**
@@ -76,6 +76,27 @@ export function parseFlare(r: RawFlare): GoesFlare | null {
   };
 }
 
+/**
+ * SWPC rewrites these files every minute; very occasionally a request catches one half-written
+ * (valid JSON at the start, cut off later). Retry once after a moment before reporting it.
+ */
+async function fetchFlux(upstream: Upstream, url: string): Promise<unknown> {
+  try {
+    return await upstream.json<unknown>("SWPC GOES X-ray flux", url, { timeoutMs: 15_000 });
+  } catch (err) {
+    if (!(err instanceof SourceError) || err.kind !== "parse") throw err;
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      return await upstream.json<unknown>("SWPC GOES X-ray flux (retry)", url, { timeoutMs: 15_000 });
+    } catch (err2) {
+      if (err2 instanceof SourceError && err2.kind === "parse") {
+        throw new SourceError("parse", "SWPC sent an incomplete X-ray file twice (it is rewritten every minute); the next update should succeed.");
+      }
+      throw err2;
+    }
+  }
+}
+
 export const goesSource: SourceModule<"goes"> = {
   id: "goes",
   title: "GOES X-ray flux",
@@ -85,7 +106,7 @@ export const goesSource: SourceModule<"goes"> = {
     const hours = params.get("hours") === "6" ? 6 : 24;
     const fluxUrl = `${SWPC_BASE}/${hours === 6 ? "xrays-6-hour" : "xrays-1-day"}.json`;
     const [flux, latest, list] = await Promise.all([
-      upstream.json<unknown>("SWPC GOES X-ray flux", fluxUrl, { timeoutMs: 15_000 }),
+      fetchFlux(upstream, fluxUrl),
       upstream.json<RawFlare[]>("SWPC latest flare", `${SWPC_BASE}/xray-flares-latest.json`, { timeoutMs: 10_000 }).catch(() => null),
       hours === 24 ? upstream.json<RawFlare[]>("SWPC flare list (7 days)", `${SWPC_BASE}/xray-flares-7-day.json`, { timeoutMs: 10_000 }).catch(() => null) : Promise.resolve(null),
     ]);

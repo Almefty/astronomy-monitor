@@ -214,3 +214,25 @@ describe("GOES X-ray flux", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("GOES truncated files", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("retries once when SWPC serves a half-written file", async () => {
+    let n = 0;
+    vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes("xrays-")) return new Response(n++ === 0 ? JSON.stringify(xrays).slice(0, 500) : JSON.stringify(xrays));
+      return Response.json(flaresLatest);
+    });
+    const up = new Upstream();
+    const d = await goesSource.load({ env: {} as never, upstream: up, params: new URLSearchParams("hours=6"), now: new Date(), notices: [] });
+    expect(d.points.length).toBe(30);
+    expect(up.calls.filter((c) => c.name.startsWith("SWPC GOES X-ray flux")).length).toBe(2);
+  });
+
+  it("explains in plain words when the retry is truncated too", async () => {
+    vi.stubGlobal("fetch", async () => new Response('[{"time_tag": "2026-10-13T12:11:00Z", "satellite": 18, "flux'));
+    await expect(goesSource.load({ env: {} as never, upstream: new Upstream(), params: new URLSearchParams("hours=6"), now: new Date(), notices: [] })).rejects.toThrow(/incomplete X-ray file/);
+  });
+});
