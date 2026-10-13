@@ -1,4 +1,4 @@
-import type { ApiErrorBody, Envelope, SourceDataMap, SourceId, StatusResponse } from "../../shared/contract";
+import type { ApiErrorBody, Envelope, GcnCircular, SourceDataMap, SourceId, StatusResponse } from "../../shared/contract";
 
 export class ApiError extends Error {
   constructor(
@@ -69,4 +69,9 @@ export async function fetchText(path: string, signal?: AbortSignal): Promise<str
     throw new ApiError(body?.error?.message ?? `Catalog request failed (HTTP ${res.status}).`, body, res.status);
   }
   return res.text();
+}
+
+/** One GCN Circular for the reader (fetched when the user opens it). */
+export function fetchCircular(id: number, signal?: AbortSignal): Promise<GcnCircular> {
+  return getJson<GcnCircular>(`/api/gcn/circulars/${id}`, withTimeout(30_000, signal));
 }

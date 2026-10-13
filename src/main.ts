@@ -11,6 +11,7 @@ import { fetchStatus } from "./core/api";
 import { h, icon } from "./core/dom";
 import { localTime } from "./core/format";
 import { ICONS } from "./core/icons";
+import { LiveMode } from "./core/live";
 import { PanelHost, type AppContext } from "./core/panel";
 import { applyTheme, currentChoice, initTheme, type ThemeChoice } from "./core/theme";
 import { PANELS } from "./panels/index";
@@ -19,6 +20,7 @@ initTheme();
 
 const ctx: AppContext = { env: import.meta.env.DEV ? "development" : "production" };
 const hosts = PANELS.map((def) => new PanelHost(def, ctx));
+const live = new LiveMode(hosts);
 
 /* ---------- Header */
 
@@ -70,9 +72,31 @@ async function refreshAll() {
   refreshAllBtn.disabled = false;
   refreshAllBtn.classList.remove("is-busy");
   const ok = hosts.filter((host) => host.result && host.result.fetchedAt >= started).length;
-  lastAll.textContent = `Last full refresh ${localTime(started)} · ${ok} of ${hosts.length} sources updated`;
+  lastAll.textContent = `Last full refresh ${localTime(started)} · ${ok} of ${hosts.length} panels updated`;
 }
 refreshAllBtn.addEventListener("click", () => void refreshAll());
+
+/* ---------- Live mode (opt-in; off on every visit) */
+
+const liveBtn = h(
+  "button",
+  { class: "btn live-toggle", type: "button", "aria-pressed": "false", title: "Live mode: refresh fast-changing data automatically while this page is visible" },
+  h("span", { class: "live-dot", "aria-hidden": "true" }),
+  h("span", null, "Live"),
+);
+const liveStatus = h("div", { class: "live-status", role: "status", hidden: true });
+liveBtn.addEventListener("click", () => live.setEnabled(!live.enabled));
+window.addEventListener("livechange", () => {
+  const st = live.status();
+  liveBtn.setAttribute("aria-pressed", String(st !== "off"));
+  liveBtn.dataset.state = st;
+  liveStatus.hidden = st === "off";
+  liveStatus.replaceChildren(
+    h("span", { class: "live-dot", "data-state": st, "aria-hidden": "true" }),
+    h("strong", null, st === "paused" ? "Live mode paused" : "Live mode on"),
+    h("span", null, st === "paused" ? (navigator.onLine ? " — this tab is hidden, so nothing is fetched." : " — you’re offline.") : ` — ${live.describe()}. Pauses while this tab is hidden.`),
+  );
+});
 window.addEventListener("keydown", (ev) => {
   const target = ev.target as HTMLElement;
   if (ev.key === "R" && ev.shiftKey && !ev.metaKey && !ev.ctrlKey && !/INPUT|TEXTAREA|SELECT/.test(target.tagName)) void refreshAll();
@@ -86,7 +110,7 @@ const topbar = h(
     { class: "topbar-inner" },
     h("div", { class: "app-label" }, "Astronomy Monitor"),
     clock,
-    h("div", { class: "topbar-actions" }, themeGroup, refreshAllBtn),
+    h("div", { class: "topbar-actions" }, themeGroup, liveBtn, refreshAllBtn),
   ),
 );
 
@@ -133,16 +157,17 @@ document.body.append(
     h(
       "section",
       { class: "intro", "aria-label": "Overview" },
-      h("div", null, h("h1", null, "What’s happening up there"), h("p", null, "Asteroid flybys, the Sun’s mood, newly found worlds and today’s sky picture — fetched live from NASA and JPL when you ask.")),
+      h("div", null, h("h1", null, "What’s happening up there"), h("p", null, "Asteroid flybys, the Sun’s mood, cosmic explosions, what Webb and Hubble are looking at, newly found worlds and today’s sky picture — fetched live when you ask.")),
       lastAll,
     ),
+    liveStatus,
     strip,
     grid,
     h(
       "footer",
       { class: "site-foot" },
-      h("span", null, "Data: NASA/JPL SSD-CNEOS · NASA DONKI (CCMC) · NASA Exoplanet Archive (Caltech/IPAC) · NASA APOD. All times UTC unless noted."),
-      h("span", null, "Data is only fetched when you press a refresh button."),
+      h("span", null, "Data: NASA/JPL SSD-CNEOS · NASA DONKI (CCMC) · NOAA SWPC · NASA GCN · STScI & MAST · CDS · NASA Exoplanet Archive (Caltech/IPAC) · NASA APOD. All times UTC unless noted."),
+      h("span", null, "Data is fetched when you press a refresh button — or, only while Live mode is on and this tab is visible, automatically."),
     ),
   ),
 );

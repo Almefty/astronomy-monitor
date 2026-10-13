@@ -14,5 +14,10 @@ export const ICONS = {
   telescope: wrap(`<path d="M3 13l12-6 2 4-12 6z"/><path d="M15 7l3.5-1.7 2 4L17 11"/><path d="M9 15l-3 6M10.5 14.5l2.5 6.5"/>`),
   external: wrap(`<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>`),
   play: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>`,
+  burst: wrap(`<circle cx="12" cy="12" r="2.6"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4M5.3 5.3l2.8 2.8M15.9 15.9l2.8 2.8M5.3 18.7l2.8-2.8M15.9 8.1l2.8-2.8"/>`),
+  close: wrap(`<path d="M6 6l12 12M18 6L6 18"/>`),
+  prev: wrap(`<path d="M15 5l-7 7 7 7"/>`),
+  next: wrap(`<path d="M9 5l7 7-7 7"/>`),
+  doc: wrap(`<path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10.5a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z"/><path d="M14 3.5V8h4M9 12h6M9 15.5h6"/>`),
   key: wrap(`<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>`),
 } as const;

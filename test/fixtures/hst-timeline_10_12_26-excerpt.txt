@@ -1,0 +1,186 @@
+
+
+
+08-Oct-2026 14:09:35             ---   HST  Observing  Timeline  Report  for  SMS:   262857A7   ---                           Page 1
+                 SMS Start: 2026.285:00:00:00 (12-OCT-2026 00:00:00), End: 2026.291:23:15:00 (18-OCT-2026 23:15:00)                 
+
+
+
+
+         Observation  Set            Principal                                        Science                      Spectral     Exposure
+         Begin UT End  UT   SU Id    Investigat Exp #  Target                         Instrume Mode   Apertures    Elements     Time(sec) OB AL EX O#
+-------- -------- --------  -------  ---------- ------ ----------                     -------- ------ ------------ ------------ --------- -- -- -- --
+2026.285 00:30:00 00:32:24  179481Q  Pidgeon    1Q-001 DARK                           WFC3/UVI ACCUM  UVIS                          0.50  1Q 01 01 A1
+2026.285 00:30:00 00:57:55  179481Q  Pidgeon    1Q-002 DARK                           S/C      DATA   NONE                          4.00  1Q 02 01   
+2026.285 00:32:24 00:34:44  179481Q  Pidgeon    1Q-003 DARK                           WFC3/UVI ACCUM  UVIS                          0.50  1Q 03 01 A5
+2026.285 00:34:44 00:34:52  179481Q  Pidgeon    1Q-004 DARK                           WFC3/UVI ACCUM  UVIS                        900.00  1Q 04 01 A6
+2026.285 00:30:00 00:49:04  18156J3  Dallas     J3-001 DARK                           STIS/CCD ACCUM  F28X50LP     MIRVIS        1100.00  J3 01 01 A2
+2026.285 00:49:04 00:50:48  18156J3  Dallas     J3-002 DARK                           STIS/CCD ACCUM  F28X50LP     MIRVIS          60.00  J3 01 02 A3
+2026.285 00:50:48 00:57:59  18156J3  Dallas     J3-003 DARK                           STIS/CCD ACCUM  F28X50LP     MIRVIS          60.00  J3 01 03 A4
+2026.285 01:04:14 01:08:51  1822829  Reinhart   29-001 DARK                           S/C      DATA   NONE                         70.00  29 01 01 AA
+2026.285 01:05:24 01:08:51  1822829  Reinhart   29-002 DARK                           S/C      DATA   NONE                         70.00  29 02 01 AB
+2026.285 01:06:34 01:08:51  1822829  Reinhart   29-003 DARK                           S/C      DATA   NONE                         70.00  29 03 01 AC
+2026.285 01:07:46 01:08:51  1822829  Reinhart   29-004 DARK                           S/C      DATA   NONE                         70.00  29 04 01 AD
+2026.285 01:23:33 01:42:37  18156J4  Dallas     J4-001 DARK                           STIS/CCD ACCUM  F28X50LP     MIRVIS        1100.00  J4 01 01 AE
+2026.285 01:42:37 01:44:21  18156J4  Dallas     J4-002 DARK                           STIS/CCD ACCUM  F28X50LP     MIRVIS          60.00  J4 01 02 AF
+2026.285 01:44:21 01:46:09  18156J4  Dallas     J4-003 DARK                           STIS/CCD ACCUM  F28X50LP     MIRVIS          60.00  J4 01 03 AG
+2026.285 01:25:02 01:42:53  179481R  Pidgeon    1R-001 DARK-NM                        WFC3/UVI ACCUM  UVIS         F280N          900.00  1R 01 01 AH
+2026.285 01:42:53 02:26:46  179481R  Pidgeon    1R-001 DARK-NM                        WFC3/UVI ACCUM  UVIS         F280N          900.00  1R 02 01 AJ
+2026.285 01:39:36 01:49:44  1806154  Jones      54-001 DW0930P2143                    ACS/WFC  ACCUM  WFC1         F606W          368.00  54 01 01 AI
+                                                                                                                   CLEAR2L     
+2026.285 01:49:44 01:49:54  1806154  Jones      54-001 DW0930P2143                    ACS/WFC  ACCUM  WFC1         F606W          368.00  54 02 01 AL
+                                                                                                                   CLEAR2L     
+2026.285 01:58:30 01:59:35  1806154  Jones      54-002 DW0930P2143                    ACS/WFC  ACCUM  WFC1         CLEAR1L        498.00  54 03 01 AN
+                                                                                                                   F814W       
+2026.285 02:10:21 02:10:31  1806154  Jones      54-002 DW0930P2143                    ACS/WFC  ACCUM  WFC1         CLEAR1L        498.00  54 04 01 AP
+                                                                                                                   F814W       
+2026.285 03:02:17 03:07:34  1804001  Erba       01-001 -KSI01-CMA                     STIS/CCD ACQ    F25ND5       MIRVIS           1.40  01 01 01 AT
+2026.285 03:07:34 03:12:48  1804001  Erba       01-002 -KSI01-CMA                     STIS/CCD ACQ/PE S330X050     MIRVIS           0.10  01 02 01 AU
+2026.285 03:12:48 03:15:18  1804001  Erba       01-002 -KSI01-CMA                     STIS/CCD ACQ/PE S330X050     MIRVIS           0.10  01 03 01 AV
+2026.285 03:18:24 03:19:26  1804001  Erba       01-003 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  01 04 02 AX
+2026.285 03:15:18 03:18:24  1804001  Erba       01-003 WAVELINE                       STIS/MA1 ACCUM  S200X060     E140M            0.00  01 04 01 AW
+2026.285 03:27:01 03:33:08  1804001  Erba       01-004 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  01 04 03 B0
+2026.285 03:33:08 03:33:33  1804001  Erba       01-005 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  01 04 04 B1
+2026.285 03:39:15 03:45:29  1804001  Erba       01-006 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  01 04 05 B3
+2026.285 03:30:45 03:35:09  17978DU  Guzman     DU-001 BIAS                           ACS/WFC  ACCUM  WFC          F502N            0.00  DU 01 01 B4
+                                                                                                                   F660N       
+2026.285 03:35:09 03:35:24  17978DU  Guzman     DU-002 DARK                           ACS/WFC  ACCUM  WFC          F502N          650.50  DU 01 02 B5
+                                                                                                                   F660N       
+2026.285 03:48:30 03:48:45  17978DU  Guzman     DU-003 DARK                           ACS/WFC  ACCUM  WFC          F502N          650.50  DU 01 03 B7
+                                                                                                                   F660N       
+2026.285 04:07:38 04:12:14  17978DV  Guzman     DV-001 DARK                           ACS/WFC  ACCUM  WFC          F502N            0.50  DV 01 01 BB
+                                                                                                                   F660N       
+2026.285 04:12:14 04:12:29  17978DV  Guzman     DV-002 DARK                           ACS/WFC  ACCUM  WFC          F502N          650.50  DV 01 02 BC
+                                                                                                                   F660N       
+2026.285 04:25:35 04:25:50  17978DV  Guzman     DV-003 DARK                           ACS/WFC  ACCUM  WFC          F502N          650.50  DV 01 03 BE
+                                                                                                                   F660N       
+2026.285 04:36:13 04:41:30  1804002  Erba       02-001 -KSI01-CMA                     STIS/CCD ACQ    F25ND5       MIRVIS           1.40  02 01 01 BG
+
+
+
+08-Oct-2026 14:09:36             ---   HST  Observing  Timeline  Report  for  SMS:   262857A7   ---                           Page 2
+                 SMS Start: 2026.285:00:00:00 (12-OCT-2026 00:00:00), End: 2026.291:23:15:00 (18-OCT-2026 23:15:00)                 
+
+
+
+
+         Observation  Set            Principal                                        Science                      Spectral     Exposure
+         Begin UT End  UT   SU Id    Investigat Exp #  Target                         Instrume Mode   Apertures    Elements     Time(sec) OB AL EX O#
+-------- -------- --------  -------  ---------- ------ ----------                     -------- ------ ------------ ------------ --------- -- -- -- --
+2026.285 04:41:30 04:46:44  1804002  Erba       02-002 -KSI01-CMA                     STIS/CCD ACQ/PE S330X050     MIRVIS           0.10  02 02 01 BH
+2026.285 04:46:44 04:49:14  1804002  Erba       02-002 -KSI01-CMA                     STIS/CCD ACQ/PE S330X050     MIRVIS           0.10  02 03 01 BI
+2026.285 04:52:20 04:53:22  1804002  Erba       02-003 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  02 04 02 BK
+2026.285 04:49:14 04:52:20  1804002  Erba       02-003 WAVELINE                       STIS/MA1 ACCUM  S200X060     E140M            0.00  02 04 01 BJ
+2026.285 05:00:57 05:07:04  1804002  Erba       02-004 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  02 04 03 BN
+2026.285 05:07:04 05:07:29  1804002  Erba       02-005 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  02 04 04 BO
+2026.285 05:13:11 05:19:25  1804002  Erba       02-006 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  02 04 05 BQ
+2026.285 05:27:08 05:27:52  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 01 BT
+2026.285 05:27:52 05:28:36  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 02 BU
+2026.285 05:28:36 05:29:20  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 03 BV
+2026.285 05:29:20 05:30:04  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 04 BW
+2026.285 05:30:04 05:30:48  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 05 BX
+2026.285 05:30:48 05:31:32  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 06 BY
+2026.285 05:31:32 05:32:20  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 07 BZ
+2026.285 05:35:13 05:35:57  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 08 C1
+2026.285 05:35:57 05:36:41  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 09 C2
+2026.285 05:36:41 05:37:25  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 0A C3
+2026.285 05:37:25 05:38:09  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 0B C4
+2026.285 05:38:09 05:38:53  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 0C C5
+2026.285 05:38:53 05:39:37  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 0D C6
+2026.285 05:39:37 05:40:25  181589K  Lothringer 9K-001 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 0E C7
+2026.285 05:43:18 05:44:02  181589K  Lothringer 9K-002 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 0F C9
+2026.285 05:44:02 05:44:46  181589K  Lothringer 9K-002 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 0G CA
+2026.285 05:44:46 05:45:30  181589K  Lothringer 9K-002 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 0H CB
+2026.285 05:45:30 05:46:17  181589K  Lothringer 9K-003 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 0I CC
+2026.285 05:46:17 05:47:04  181589K  Lothringer 9K-003 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 0J CD
+2026.285 05:47:04 05:47:51  181589K  Lothringer 9K-004 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 0K CE
+2026.285 05:47:51 05:48:42  181589K  Lothringer 9K-004 BIAS                           STIS/CCD ACCUM  F28X50LP     MIRVIS           0.00  9K 01 0L CF
+2026.285 06:10:09 06:15:26  1804003  Erba       03-001 -KSI01-CMA                     STIS/CCD ACQ    F25ND5       MIRVIS           1.40  03 01 01 CH
+2026.285 06:15:26 06:20:40  1804003  Erba       03-002 -KSI01-CMA                     STIS/CCD ACQ/PE S330X050     MIRVIS           0.10  03 02 01 CI
+2026.285 06:20:40 06:23:10  1804003  Erba       03-002 -KSI01-CMA                     STIS/CCD ACQ/PE S330X050     MIRVIS           0.10  03 03 01 CJ
+2026.285 06:26:16 06:27:18  1804003  Erba       03-003 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  03 04 02 CL
+2026.285 06:23:10 06:26:16  1804003  Erba       03-003 WAVELINE                       STIS/MA1 ACCUM  S200X060     E140M            0.00  03 04 01 CK
+2026.285 06:34:53 06:41:00  1804003  Erba       03-004 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  03 04 03 CO
+2026.285 06:41:00 06:41:25  1804003  Erba       03-005 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  03 04 04 CP
+2026.285 06:47:07 06:53:21  1804003  Erba       03-006 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  03 04 05 CR
+2026.285 07:44:05 07:49:22  1804004  Erba       04-001 -KSI01-CMA                     STIS/CCD ACQ    F25ND5       MIRVIS           1.40  04 01 01 CT
+2026.285 07:49:22 07:54:36  1804004  Erba       04-002 -KSI01-CMA                     STIS/CCD ACQ/PE S330X050     MIRVIS           0.10  04 02 01 CU
+2026.285 07:54:36 07:57:06  1804004  Erba       04-002 -KSI01-CMA                     STIS/CCD ACQ/PE S330X050     MIRVIS           0.10  04 03 01 CV
+2026.285 08:00:12 08:01:14  1804004  Erba       04-003 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  04 04 02 CX
+2026.285 07:57:06 08:00:12  1804004  Erba       04-003 WAVELINE                       STIS/MA1 ACCUM  S200X060     E140M            0.00  04 04 01 CW
+2026.285 08:08:49 08:14:56  1804004  Erba       04-004 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  04 04 03 D0
+2026.285 08:14:56 08:15:21  1804004  Erba       04-005 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  04 04 04 D1
+2026.285 08:21:03 08:27:17  1804004  Erba       04-006 -KSI01-CMA                     STIS/MA1 ACCUM  S330X050     E140M          343.00  04 04 05 D3
+2026.285 09:03:25 09:07:30  17804ON  Loyd       ON-001 TOI-4643                       STIS/CCD ACQ    F28X50LP     MIRVIS           0.10  ON 01 01 D5
+
+
+
+08-Oct-2026 14:09:36             ---   HST  Observing  Timeline  Report  for  SMS:   262857A7   ---                           Page 3
+                 SMS Start: 2026.285:00:00:00 (12-OCT-2026 00:00:00), End: 2026.291:23:15:00 (18-OCT-2026 23:15:00)                 
+
+
+
+
+         Observation  Set            Principal                                        Science                      Spectral     Exposure
+         Begin UT End  UT   SU Id    Investigat Exp #  Target                         Instrume Mode   Apertures    Elements     Time(sec) OB AL EX O#
+-------- -------- --------  -------  ---------- ------ ----------                     -------- ------ ------------ ------------ --------- -- -- -- --
+2026.285 09:08:05 09:44:56  17804ON  Loyd       ON-002 TOI-4643                       STIS/MA1 TIME-T SL200        G140L         2064.00  ON 03 01 D7
+2026.285 09:47:50 09:49:19  17804ON  Loyd       ON-003 WAVEHITM                       STIS/MA1 ACCUM  SL200        G140L            0.00  ON 05 01 D9
+2026.285 10:39:44 10:49:54  1806119  Jones      19-001 DW0225P4153                    ACS/WFC  ACCUM  WFC1         F606W          370.00  19 01 01 DB
+                                                                                                                   CLEAR2L     
+-------- -------- --------  -------  ---------- ------ ----------                     -------- ------ ------------ ------------ --------- -- -- -- --
+2026.291 21:59:21 22:21:47  1811801  Deshmukh   01-004 2MASS-J05393611-6904591        COS/FUV  TIME-T PSA          G160M         1183.00  01 07 01 PC
+2026.291 22:23:11 22:46:07  1811801  Deshmukh   01-005 2MASS-J05393611-6904591        COS/FUV  TIME-T PSA          G160M         1307.00  01 09 01 PE
+
+
+
+
+08-Oct-2026 14:09:42                         ---  HST  Observing  Timeline  Report  ---                                       Page 1
+                                              Proposal  Titles    for  SMS:   262857A7                                              
+
+
+
+     Prop  Prog    Principal
+     Id    Id      Investigator       Proposal Title
+     ----- ----    ---------------    ----------------------------------------------------------------------
+     15601 DU7     Sahnow             COS FUV DCE Memory Dump                                                              
+     15962 EGS     Reinhart           Routine EEPROM dumps for ACS, COS, STIS, and WFC3                                    
+     17309 F50     Mehta              Resolved imaging survey of the analogs of high-z massive, star-forming clum          
+     17469 F9F     Debes              Bridging the Gap Between Exo-Kuiper Belts and the Solar System's Zodiacal L          
+     17700 FHI     Johns-Krull        Separating Accretion and Magnetic Activity in Young Brown Dwarfs                     
+     17734 FE0     Wakker             A clean view of the CGM for well-characterized galaxies                              
+     17792 FFG     Ernandes           STIS Analysis of the metal-poor r-element-rich star TYC 3814-1598-1                  
+     17804 FHJ     Loyd               STELa: Survey of Transiting Exoplanets in Lyman-alpha                                
+     17913 FJQ     Lin                The False positive in the Lyman Continuum escape fraction estimation                 
+     17921 FK4     Serrano Borlaff    In-flight calibration of the stray-light blocking efficiency of HST/ACS              
+     17934 FKM     Johnson            Cycle 33 NUV Detector Dark Monitor                                                   
+     17944 FL3     Baggett            WFC3 UVIS Anneal                                                                     
+     17945 FLX     Pidgeon            WFC3 UVIS Bowtie Monitor                                                             
+     17948 FLW     Pidgeon            WFC3 UVIS CCD Daily Monitor Part 2                                                   
+     17954 FLO     O'Connor           WFC3 UVIS Traps with Charge Injection                                                
+     17972 FLH     Kuhn               WFC3 CSM Monitor with Earth Flats                                                    
+     17978 FKX     Guzman             CCD Daily Monitor (Part 2)                                                           
+     17989 FP4     Hinkle             Building an ANT-hill: STIS UV Follow-up of Ambiguous Nuclear Transients              
+     18001 FNU     Peacock            Completing Panchromatic Spectra for High Priority HWO Target Stars                   
+     18010 FMR     Proudfoot          A Search For The Moons of Mid-Sized TNOs                                             
+     18027 FMJ     Jensen             Securing the HST Surface Brightness Fluctuation Legacy with a Robust JWST C          
+     18033 FM1     Muratore           The smoking gun uncovering the origin of the rotational spread in young Mag          
+     18034 FQC     Saldana-Lopez      Spatially resolving the conditions for ionizing radiation escape in galaxie          
+     18037 FPK     Do                 Search for massive sub-kpc dual active galactic nuclei in the most luminous          
+     18040 FQ6     Erba               First UV Observations of the Negative Extremum of xi1 CMa's Complex Magneti          
+     18053 FMB     Wakker             The Size Scale and Baryonic Content of Low Redshift Intergalactic Absorbers          
+     18055 FML     Wong               Simultaneous mapping of ammonia on Jupiter with Juno and HST/WFC3                    
+     18061 FMY     Jones              Hubble Census of Nearby Satellites                                                   
+     18070 FOB     Tully              SNAP Observations of All Unobserved Galaxies within 10 Mpc                           
+     18080 FQH     Scarlata           The High Redshift Lyman Continuum Survey                                             
+     18118 FN0     Deshmukh           VFTS 812: A Quiescent Eccentric Black Hole Binary in the LMC?                        
+     18120 FOG     Yamaguchi          A COS Legacy Survey of Gaia DR3 WD+MS binaries                                       
+     18134 FM4     Veilleux           A Far-Ultraviolet Spectroscopic Survey of AGN Dwarf Galaxies                         
+     18136 FNG     Seth               Where is the central black hole in the LMC?                                          
+     18139 FPF     Jiang              Tracing Accretion in the Planetary Regime: A Comprehensive UV/Optical Surve          
+     18156 FP6     Dallas             STIS CCD Dark Monitor Part 3                                                         
+     18158 FQN     Lothringer         STIS CCD Bias and Read Noise Monitor Part 2                                          
+     18169 FQL     Stapleton          STIS MAMA Spectroscopic Sensitivity and Focus Monitor                                
+     18197 FR8     Johnson            Cycle 33 FUV Detector Dark Monitor                                                   
+     18228 FSI     Reinhart           ACS/COS/STIS/WFC3 NED History Log Collection                                         
+     18260 FT2     Loyd               STELa: Survey of Transiting Exoplanets in Lyman-alpha                                

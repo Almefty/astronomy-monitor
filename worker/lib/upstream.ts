@@ -30,6 +30,8 @@ export interface FetchOptions {
   headers?: Record<string, string>;
   /** Treat these HTTP statuses as a valid (non-throwing) response. */
   acceptStatus?: number[];
+  /** POST a form body (MAST's API takes its JSON request as a form field). */
+  form?: Record<string, string>;
 }
 
 const USER_AGENT = "astronomy-monitor/1.0 (personal dashboard; Cloudflare Worker)";
@@ -47,6 +49,8 @@ export class Upstream {
     this.calls.push(record);
     try {
       const res = await fetch(url, {
+        method: opts.form ? "POST" : "GET",
+        body: opts.form ? new URLSearchParams(opts.form) : undefined,
         headers: { "user-agent": USER_AGENT, accept: "application/json, text/csv;q=0.9, */*;q=0.5", ...opts.headers },
         redirect: "manual",
         signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000),

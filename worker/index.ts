@@ -2,6 +2,7 @@ import type { ApiErrorBody, Envelope, Notice, StatusResponse } from "../shared/c
 import { appEnv, nasaKey, type Env } from "./lib/env";
 import { SourceError, Upstream } from "./lib/upstream";
 import { streamCatalog } from "./sources/exoplanets";
+import { fetchCircular } from "./sources/gcn";
 import { getSource, SOURCES } from "./sources/index";
 
 const API_HEADERS: Record<string, string> = {
@@ -50,6 +51,17 @@ async function handleApi(request: Request, env: Env): Promise<Response> {
       return await streamCatalog(upstream);
     } catch (err) {
       return errorResponse("exoplanets/catalog", err, upstream);
+    }
+  }
+
+  // One GCN Circular for the in-page reader (fetched only when the user opens it).
+  const circ = /^\/api\/gcn\/circulars\/(\d{1,7})$/.exec(path)?.[1];
+  if (circ) {
+    const upstream = new Upstream();
+    try {
+      return json(await fetchCircular(upstream, Number(circ)));
+    } catch (err) {
+      return errorResponse("gcn/circular", err, upstream);
     }
   }
 

@@ -15,7 +15,7 @@ export function svgRoot(width: number, height: number, label: string): SVGSVGEle
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** Bottom time axis with day ticks (UTC) and optional vertical gridlines. */
+/** Bottom time axis with day ticks (or hour ticks for spans under 3 days, UTC) and optional vertical gridlines. */
 export function timeAxis(
   g: SVGGElement,
   x: ScaleTime<number, number>,
@@ -25,12 +25,23 @@ export function timeAxis(
 ) {
   const ax = s("g", { class: "axis" });
   const ticks = x.ticks(Math.max(2, maxTicks));
+  // Short spans (the live X-ray chart) get clock-time labels; days are marked at midnight.
+  const [d0, d1] = x.domain() as [Date, Date];
+  const hourly = d1.getTime() - d0.getTime() < 3 * 86_400_000;
   ax.append(s("line", { x1: x.range()[0], x2: x.range()[1], y1: y0 + 0.5, y2: y0 + 0.5 }));
+  let labelled = 0;
   for (const t of ticks) {
     const px = Math.round(x(t)) + 0.5;
     if (gridTop !== null) g.append(s("line", { class: "gridline", x1: px, x2: px, y1: gridTop, y2: y0 }));
     ax.append(s("line", { x1: px, x2: px, y1: y0, y2: y0 + 4 }));
-    const label = t.getUTCDate() === 1 || t === ticks[0] ? `${t.getUTCDate()} ${MONTHS[t.getUTCMonth()]}` : String(t.getUTCDate());
+    const midnight = t.getUTCHours() === 0 && t.getUTCMinutes() === 0;
+    const day = `${t.getUTCDate()} ${MONTHS[t.getUTCMonth()]}`;
+    // Day-scale axes label only midnight ticks (a 12-hour tick would repeat the date).
+    if (!hourly && !midnight) continue;
+    const label = hourly
+      ? midnight ? day : `${String(t.getUTCHours()).padStart(2, "0")}:${String(t.getUTCMinutes()).padStart(2, "0")}`
+      : t.getUTCDate() === 1 || labelled === 0 ? day : String(t.getUTCDate());
+    labelled++;
     ax.append(s("text", { x: px, y: y0 + 16, "text-anchor": "middle" }, label));
   }
   g.append(ax);
@@ -66,6 +77,8 @@ export interface HoverPoint {
   /** Element to highlight while hovered. */
   mark?: SVGElement;
   href?: string;
+  /** Action on click (mouse), second tap (touch) or Enter (keyboard); takes precedence over href. */
+  onSelect?: () => void;
 }
 
 /**
@@ -106,17 +119,21 @@ export function hoverLayer(svg: SVGSVGElement, points: HoverPoint[], area: { x: 
     setHot(p);
     if (p) showTip(p.tip, ev.clientX, ev.clientY);
     else hideTip();
-    rect.style.cursor = p?.href ? "pointer" : "default";
+    rect.style.cursor = p?.href || p?.onSelect ? "pointer" : "default";
   });
   rect.addEventListener("pointerleave", () => {
     setHot(null);
     hideTip();
   });
+  let tapped: HoverPoint | null = null;
   rect.addEventListener("click", (ev) => {
     const { x, y } = toLocal(ev);
     const p = nearest(x, y);
-    // On touch, the first tap shows the tooltip; links open from the list/table instead.
-    if (p?.href && ev.pointerType === "mouse") window.open(p.href, "_blank", "noopener");
+    const mouse = ev.pointerType === "mouse";
+    // On touch, the first tap shows the tooltip; a second tap on the same point selects it.
+    if (p?.onSelect && (mouse || tapped === p)) p.onSelect();
+    else if (p?.href && mouse) window.open(p.href, "_blank", "noopener");
+    tapped = p;
   });
 
   // Keyboard: each point gets an invisible focusable target.
@@ -130,6 +147,11 @@ export function hoverLayer(svg: SVGSVGElement, points: HoverPoint[], area: { x: 
     t.addEventListener("blur", () => {
       setHot(null);
       hideTip();
+    });
+    t.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      if (p.onSelect) p.onSelect();
+      else if (p.href) window.open(p.href, "_blank", "noopener");
     });
     kb.append(t);
   }

@@ -6,7 +6,9 @@ Read `README.md` (architecture, commands) and `TASKS.md` (state, known issues, l
 
 ## Hard constraints
 - **Cloudflare free plan only.** No paid services, no databases (D1/KV/R2/Durable Objects), no cron
-  triggers or background jobs. Data is fetched only when the user presses a refresh button.
+  triggers or background jobs. Data is fetched only when the user presses a refresh button — the one
+  approved exception is **Live mode** (v2): opt-in, off on every visit, only while the tab is visible,
+  per-feed intervals within upstream limits (see `src/core/live.ts`).
 - Keep the Worker within the free plan's **10 ms CPU per request**: stream large payloads through
   unparsed (see the exoplanet catalog), and stop parsing once you have what you need.
 - **`NASA_API_KEY` is a Worker secret.** Never put it in frontend code, Git, logs, commit messages or

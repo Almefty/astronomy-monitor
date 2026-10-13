@@ -23,6 +23,11 @@ export interface AppContext {
   env: "development" | "production";
 }
 
+/** What render() gets besides the data: the app context and a way to reload (part of) the panel. */
+export interface RenderContext extends AppContext {
+  refresh(params?: Record<string, string>): void;
+}
+
 export interface ErrorAction {
   label: string;
   /** Loads alternative data (e.g. a saved sample) for this panel. */
@@ -30,9 +35,27 @@ export interface ErrorAction {
 }
 
 /**
- * Everything a dashboard panel needs. To add a panel (v2: GCN all-sky map, JWST/HST
- * targets, live GOES X-rays, 3D solar system) implement this interface in
- * src/panels/<name>.ts and register it in src/panels/index.ts. Heavy panels can
+ * A source that live mode refreshes automatically while the page is visible.
+ * `params` selects a partial refresh (e.g. only the GOES feed of the solar panel).
+ */
+export interface LiveFeed<D = unknown> {
+  label: string;
+  everyMs: number;
+  params?: Record<string, string>;
+  /** When this feed's data was last fetched (defaults to the result's fetchedAt). */
+  lastUpdate?(result: PanelResult<D>): string | null;
+}
+
+/** A rendered panel that can take new data in place (keeps hover state, scroll, open details). */
+export interface PanelView<D> {
+  destroy?(): void;
+  /** Apply a newer result without a full re-render; return false to fall back to one. */
+  update?(result: PanelResult<D>): boolean;
+}
+
+/**
+ * Everything a dashboard panel needs. To add a panel (v3: the 3D Solar System) implement this
+ * interface in src/panels/<name>.ts and register it in src/panels/index.ts. Heavy panels can
  * lazy-load their libraries inside render() with a dynamic import().
  */
 export interface PanelDefinition<D> {
@@ -42,10 +65,13 @@ export interface PanelDefinition<D> {
   icon: string;
   span: "span-12" | "span-7" | "span-5";
   source: { name: string; url: string };
-  /** Fetch fresh data. Called only when the user presses a refresh button. */
-  load(signal: AbortSignal, params: Record<string, string>): Promise<PanelResult<D>>;
-  /** Draw into `root`. Return an optional cleanup (observers, listeners). */
-  render(root: HTMLElement, result: PanelResult<D>, ctx: AppContext): void | (() => void);
+  /**
+   * Fetch fresh data — when the user presses a refresh button, or in live mode. `prev` is the
+   * result currently shown, so a partial refresh (params) can keep the parts it doesn't reload.
+   */
+  load(signal: AbortSignal, params: Record<string, string>, prev: PanelResult<D> | null): Promise<PanelResult<D>>;
+  /** Draw into `root`. Return a cleanup function, or a view that can update in place. */
+  render(root: HTMLElement, result: PanelResult<D>, ctx: RenderContext): void | (() => void) | PanelView<D>;
   /** One-line readout for the "Right now" strip. */
   summarize?(result: PanelResult<D>): Summary | null;
   /** Panel-specific controls rendered in the header (e.g. a time-range switch). */
@@ -54,6 +80,10 @@ export interface PanelDefinition<D> {
   errorActions?(err: ApiError, ctx: AppContext): ErrorAction[];
   /** Whether to keep the last result in localStorage (default true). */
   persist?: boolean;
+  /** Turn a saved snapshot (possibly from an older version of the app) into current data, or null. */
+  migrate?(snapshot: PanelResult<unknown>): PanelResult<D> | null;
+  /** Fast-changing sources refreshed automatically in live mode (opt-in, see core/live.ts). */
+  live?: LiveFeed<D>[];
 }
 
 type Listener = () => void;
@@ -64,9 +94,10 @@ export class PanelHost<D = unknown> {
   private stamp: HTMLElement;
   private foot: HTMLElement;
   private refreshBtn: HTMLButtonElement;
-  private cleanup: (() => void) | null = null;
+  private view: PanelView<D> | null = null;
   private controller: AbortController | null = null;
   private listeners: Listener[] = [];
+  private liveError: string | null = null;
   result: PanelResult<D> | null = null;
   params: Record<string, string> = {};
   busy = false;
@@ -100,7 +131,13 @@ export class PanelHost<D = unknown> {
     );
     this.renderEmpty();
     if (def.persist !== false) {
-      const snap = load<PanelResult<D>>(`snap:${def.id}`);
+      const raw = load<PanelResult<unknown>>(`snap:${def.id}`);
+      let snap: PanelResult<D> | null = null;
+      try {
+        snap = raw ? (def.migrate ? def.migrate(raw) : (raw as PanelResult<D>)) : null;
+      } catch {
+        snap = null;
+      }
       if (snap) this.show(snap, true);
     }
     setInterval(() => this.updateStamp(), 60_000);
@@ -114,48 +151,62 @@ export class PanelHost<D = unknown> {
     for (const fn of this.listeners) fn();
   }
 
-  async refresh(extraParams: Record<string, string> = {}): Promise<void> {
+  /**
+   * Load fresh data. A quiet refresh (live mode) doesn't dim the panel, and if it fails while
+   * data is shown, the data stays and the header says the update failed. Resolves to success.
+   */
+  async refresh(extraParams: Record<string, string> = {}, opts: { quiet?: boolean } = {}): Promise<boolean> {
+    if (opts.quiet && this.busy) return false;
     this.controller?.abort();
     const controller = new AbortController();
     this.controller = controller;
-    this.setBusy(true);
+    this.setBusy(true, !!opts.quiet);
     try {
-      const result = await this.def.load(controller.signal, { ...this.params, ...extraParams });
-      if (controller.signal.aborted) return;
+      const result = await this.def.load(controller.signal, { ...this.params, ...extraParams }, this.result);
+      if (controller.signal.aborted) return false;
+      this.liveError = null;
       this.show(result, false);
-      if (this.def.persist !== false && !extraParams.sample) save(`snap:${this.def.id}`, result);
+      if (this.def.persist !== false && !result.notices.some((n) => n.text.startsWith("SAMPLE DATA")) && !extraParams.sample) save(`snap:${this.def.id}`, result);
+      return true;
     } catch (err) {
-      if (controller.signal.aborted) return;
-      this.showError(err);
+      if (controller.signal.aborted) return false;
+      if (opts.quiet && this.result && !this.body.querySelector(".panel-body > .error-state")) {
+        this.liveError = `Live update failed ${localTime(new Date().toISOString())} — retrying`;
+        console.warn(`[${this.def.id}] live update failed`, err);
+      } else {
+        this.showError(err);
+      }
+      return false;
     } finally {
       if (this.controller === controller) {
-        this.setBusy(false);
+        this.setBusy(false, !!opts.quiet);
         this.controller = null;
       }
     }
   }
 
-  private setBusy(busy: boolean) {
+  private setBusy(busy: boolean, quiet: boolean) {
     this.busy = busy;
-    this.el.classList.toggle("is-loading", busy);
+    this.el.classList.toggle(quiet ? "is-updating" : "is-loading", busy);
+    if (!busy) this.el.classList.remove("is-loading", "is-updating");
     this.refreshBtn.classList.toggle("is-busy", busy);
     this.refreshBtn.disabled = busy;
-    this.el.setAttribute("aria-busy", String(busy));
-    if (busy) this.stamp.textContent = "Fetching…";
-    else if (this.result && !this.body.querySelector(".error-state")) this.updateStamp();
+    this.el.setAttribute("aria-busy", String(busy && !quiet));
+    if (busy && !quiet) this.stamp.textContent = "Fetching…";
+    else if (this.result && !this.body.querySelector(".panel-body > .error-state")) this.updateStamp();
     this.emit();
   }
 
   private updateStamp() {
-    if (this.busy) return;
+    if (this.busy && !this.el.classList.contains("is-updating")) return;
     if (!this.result) {
       if (!this.body.querySelector(".error-state")) this.stamp.textContent = "No data yet";
       return;
     }
     const at = this.result.fetchedAt;
     const ageMs = Date.now() - new Date(at).getTime();
-    this.stamp.textContent = `Updated ${localTime(at)} · ${age(at)} ago`;
-    this.stamp.classList.toggle("is-stale", ageMs > 6 * 3600_000);
+    this.stamp.textContent = this.liveError ?? `Updated ${localTime(at)} · ${age(at)} ago`;
+    this.stamp.classList.toggle("is-stale", ageMs > 6 * 3600_000 || !!this.liveError);
     this.stamp.title = new Date(at).toString();
   }
 
@@ -170,10 +221,32 @@ export class PanelHost<D = unknown> {
     );
   }
 
+  private destroyView() {
+    try {
+      this.view?.destroy?.();
+    } catch (err) {
+      console.error(`[${this.def.id}] cleanup failed`, err);
+    }
+    this.view = null;
+  }
+
   /** Render a result. Rendering errors are contained to this panel. */
   show(result: PanelResult<D>, restored: boolean) {
-    this.cleanup?.();
-    this.cleanup = null;
+    // In-place update (live mode): same notices, a view that knows how to update.
+    if (!restored && this.view?.update && this.result && JSON.stringify(this.result.notices) === JSON.stringify(result.notices)) {
+      try {
+        if (this.view.update(result)) {
+          this.result = result;
+          this.renderFoot(result.upstream);
+          this.updateStamp();
+          this.emit();
+          return;
+        }
+      } catch (err) {
+        console.error(`[${this.def.id}] update failed, re-rendering`, err);
+      }
+    }
+    this.destroyView();
     this.result = result;
     clear(this.body);
     const content = h("div", { class: "panel-content" });
@@ -185,8 +258,10 @@ export class PanelHost<D = unknown> {
     const root = h("div");
     content.append(root);
     this.body.append(content);
+    const rctx: RenderContext = { ...this.ctx, refresh: (params = {}) => void this.refresh(params) };
     try {
-      this.cleanup = this.def.render(root, result, this.ctx) ?? null;
+      const out = this.def.render(root, result, rctx);
+      this.view = typeof out === "function" ? { destroy: out } : (out ?? null);
     } catch (err) {
       console.error(`[${this.def.id}] render failed`, err);
       root.replaceChildren(this.errorBox("This panel couldn’t draw its data.", "The data loaded, but a display error occurred. Other panels are unaffected.", null));
@@ -200,6 +275,7 @@ export class PanelHost<D = unknown> {
     const apiErr = err instanceof ApiError ? err : null;
     const message = apiErr?.message ?? (err as Error)?.message ?? "Unknown error.";
     const hint = apiErr?.body?.error.hint ?? null;
+    this.destroyView();
     clear(this.body);
     const box = this.errorBox(`Couldn’t load ${this.def.title.toLowerCase()}.`, message, hint);
     const actions = apiErr ? (this.def.errorActions?.(apiErr, this.ctx) ?? []) : [];
@@ -257,6 +333,10 @@ export class PanelHost<D = unknown> {
         ),
       ),
     );
-    this.foot.append(h("details", null, summary, list));
+    // Keep the details open across live updates if the user opened them.
+    const wasOpen = this.foot.dataset.open === "1";
+    const det = h("details", wasOpen ? { open: true } : null, summary, list);
+    det.addEventListener("toggle", () => (this.foot.dataset.open = det.open ? "1" : "0"));
+    this.foot.append(det);
   }
 }

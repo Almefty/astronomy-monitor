@@ -1,11 +1,13 @@
 import type { PanelDefinition } from "../core/panel";
 import { apodPanel } from "./apod";
 import { exoplanetPanel } from "./exoplanets";
+import { gcnPanel } from "./gcn";
 import { neoPanel } from "./neo";
 import { solarPanel } from "./solar";
+import { telescopePanel } from "./telescopes";
 
 /**
- * Panel order = page order. v2 panels (GCN all-sky explosions, JWST/HST targets,
- * live GOES X-rays, 3D solar system) slot in here.
+ * Panel order = page order. v3 (3D Solar System, lazy-loaded) slots in here; its live
+ * animation can follow live mode's visible/hidden state (see core/live.ts).
  */
-export const PANELS: PanelDefinition<any>[] = [neoPanel, apodPanel, solarPanel, exoplanetPanel];
+export const PANELS: PanelDefinition<any>[] = [neoPanel, apodPanel, solarPanel, gcnPanel, telescopePanel, exoplanetPanel];

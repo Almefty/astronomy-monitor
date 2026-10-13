@@ -1,11 +1,12 @@
 import { scaleLinear, scaleLog, scaleUtc } from "d3-scale";
-import type { Cme, Flare, SolarData } from "../../shared/contract";
-import { fetchSource } from "../core/api";
-import { h, onResize, s, safeUrl } from "../core/dom";
+import type { Cme, Envelope, ErrorKind, Flare, GoesData, Notice, SolarData, UpstreamCall } from "../../shared/contract";
+import { ApiError, fetchSource } from "../core/api";
+import { h, icon, onResize, s, safeUrl } from "../core/dom";
 import { fmt, relative, utc } from "../core/format";
 import { ICONS } from "../core/icons";
 import type { PanelDefinition, PanelHost, PanelResult } from "../core/panel";
 import { hoverLayer, placeLabels, svgRoot, timeAxis, yAxis, type HoverPoint, type LabelCandidate } from "../viz/chart";
+import { hideTip, showTip } from "../viz/tooltip";
 
 const DAY = 86_400_000;
 const AU_KM = 149_597_870.7;
@@ -327,24 +328,342 @@ function sideLists(data: SolarData, now: number, earthCmes: Cme[]) {
   return [h("div", null, h("h3", { class: "section-title" }, "CMEs modelled to reach Earth"), earthList), h("div", null, h("h3", { class: "section-title" }, "Strongest flares"), flareList)];
 }
 
-export const solarPanel: PanelDefinition<SolarData> = {
+/* ---------------------------------------------------------------- GOES X-ray flux (live) */
+
+const CLASS_LETTERS = ["A", "B", "C", "M", "X"] as const;
+
+/** 6.5e-7 → "B6.5"; X-class keeps counting past 10 (X12.3). */
+export function xrayClass(flux: number): string {
+  const i = Math.max(0, Math.min(4, Math.floor(Math.log10(flux) + 8)));
+  return `${CLASS_LETTERS[i]}${fmt.fixed(flux / 10 ** (i - 8), 1)}`;
+}
+
+const sci = (v: number) => {
+  const e = Math.floor(Math.log10(v));
+  return `${fmt.fixed(v / 10 ** e, 1)}×10${String(e).replace("-", "⁻").replace(/\d/g, (d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[Number(d)]!)} W/m²`;
+};
+
+function latestPoint(g: GoesData): [number, number] | null {
+  for (let i = g.points.length - 1; i >= 0; i--) {
+    const p = g.points[i]!;
+    if (p[1] !== null) return [p[0], p[1]];
+  }
+  return null;
+}
+
+function drawXray(el: HTMLElement, g: GoesData, width: number, hours: number) {
+  const now = Date.now();
+  const narrow = width < 560;
+  const m = { left: 44, right: narrow ? 12 : 92, top: 14, bottom: 28 };
+  const height = narrow ? 210 : 230;
+  const svg = svgRoot(width, height, `GOES X-ray flux, last ${hours} hours`);
+  const gr = s("g");
+  svg.append(gr);
+  const last = g.points.length ? g.points[g.points.length - 1]![0] : now;
+  const end = Math.max(last, now - 5 * 60_000);
+  const start = end - hours * 3600_000;
+  const x = scaleUtc().domain([new Date(start), new Date(end)]).range([m.left, width - m.right]);
+  const y = scaleLog().domain([1e-9, 1e-3]).range([height - m.bottom, m.top]).clamp(true);
+  const x0 = m.left, x1 = width - m.right;
+
+  yAxis(gr, y, [1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3], () => "", x0, x1, { grid: true });
+  CLASS_LETTERS.forEach((cls, i) => {
+    const yy = (y(10 ** (-8 + i)) + y(10 ** (-7 + i))) / 2;
+    gr.append(s("text", { class: "axis-label", x: x0 - 10, y: yy + 4, "text-anchor": "end" }, cls));
+  });
+  // R1 (M1) threshold: the level at which flares start to cause radio blackouts.
+  const yr1 = Math.round(y(1e-5)) + 0.5;
+  gr.append(s("line", { class: "ref-line", x1: x0, x2: x1, y1: yr1, y2: yr1, "stroke-dasharray": "3 3" }));
+  gr.append(s("text", { class: "ref-label", x: x0 + 4, y: yr1 - 4 }, "M1 · radio blackouts start (R1)"));
+
+  // Flare in progress: shade from its start to now.
+  const lf = g.latestFlare;
+  if (lf && !lf.end && Date.parse(lf.begin) > start) {
+    const bx = x(new Date(lf.begin));
+    gr.append(s("rect", { x: bx, y: m.top, width: Math.max(2, x(new Date(end)) - bx), height: height - m.top - m.bottom, fill: "var(--warning)", opacity: 0.12 }));
+    gr.append(s("text", { class: "ref-label", x: bx + 4, y: m.top + 12 }, `flare in progress${lf.currentClass ? ` · ${lf.currentClass}` : ""}`));
+  }
+
+  const inView = g.points.filter((p) => p[0] >= start - 60_000);
+  // Data gaps of 10+ minutes (outages; around the equinoxes GOES also passes through Earth's
+  // shadow once a day, when the flux ramps down to zero for up to ~70 min).
+  let gapFrom: number | null = null;
+  const gaps: [number, number][] = [];
+  for (const p of inView) {
+    if (p[1] === null) gapFrom ??= p[0];
+    else if (gapFrom !== null) {
+      if (p[0] - gapFrom >= 10 * 60_000) gaps.push([gapFrom, p[0]]);
+      gapFrom = null;
+    }
+  }
+  if (gapFrom !== null && end - gapFrom >= 10 * 60_000) gaps.push([gapFrom, end]);
+  for (const [a, b] of gaps) {
+    const gx = x(new Date(Math.max(a, start)));
+    const gw = x(new Date(b)) - gx;
+    if (gw < 2) continue;
+    gr.append(s("rect", { x: gx, y: m.top, width: gw, height: height - m.top - m.bottom, fill: "var(--panel-2)" }));
+    if (gw > 46) gr.append(s("text", { class: "ref-label", x: gx + gw / 2, y: height - m.bottom - 6, "text-anchor": "middle" }, "data gap"));
+  }
+  const path = (idx: 1 | 2) => {
+    let d = "";
+    let prev: number | null = null;
+    for (const p of inView) {
+      const v = p[idx];
+      if (v === null) {
+        prev = null;
+        continue;
+      }
+      d += `${prev === null || p[0] - prev > 3 * 60_000 ? "M" : "L"}${x(new Date(p[0])).toFixed(1)},${y(v).toFixed(1)}`;
+      prev = p[0];
+    }
+    return d;
+  };
+  gr.append(s("path", { d: path(2), fill: "none", stroke: "var(--other)", "stroke-width": 1.5, "stroke-linejoin": "round" }));
+  gr.append(s("path", { d: path(1), fill: "none", stroke: "var(--series-1)", "stroke-width": 2, "stroke-linejoin": "round" }));
+
+  // Direct labels at the line ends (desktop), so identity isn't colour-only.
+  const lastLong = [...inView].reverse().find((p) => p[1] !== null);
+  const lastShort = [...inView].reverse().find((p) => p[2] !== null);
+  if (!narrow) {
+    const ly1 = lastLong ? y(lastLong[1]!) : null;
+    let ly2 = lastShort ? y(lastShort[2]!) : null;
+    if (ly1 !== null && ly2 !== null && Math.abs(ly1 - ly2) < 14) ly2 = ly1 + (ly2 >= ly1 ? 14 : -14);
+    if (ly1 !== null) gr.append(s("text", { class: "mark-label", x: x1 + 6, y: ly1 + 4 }, "0.1–0.8 nm"));
+    if (ly2 !== null) gr.append(s("text", { class: "ref-label", x: x1 + 6, y: ly2 + 4 }, "0.05–0.4 nm"));
+  }
+
+  // Flare peaks: biggest first get label space.
+  const labels: LabelCandidate[] = [];
+  const peaks = g.flares.filter((f) => Date.parse(f.max) >= start && f.maxFlux >= 1e-6).sort((a, b) => b.maxFlux - a.maxFlux).slice(0, narrow ? 3 : 6);
+  for (const f of peaks) {
+    const px = x(new Date(f.max)), py = y(f.maxFlux);
+    gr.append(s("circle", { cx: px, cy: py, r: 3.5, fill: severityColor(rScale(f.maxFlux)), stroke: "var(--panel)", "stroke-width": 1.5 }));
+    labels.push({ x: px, y: py - 8, text: f.maxClass, anchor: "middle" });
+  }
+  placeLabels(gr, labels);
+
+  // Now marker.
+  const lp = latestPoint(g);
+  if (lp) {
+    const px = x(new Date(lp[0])), py = y(lp[1]);
+    gr.append(s("circle", { cx: px, cy: py, r: 4.5, fill: "var(--series-1)", stroke: "var(--panel)", "stroke-width": 2 }));
+  }
+  timeAxis(gr, x, height - m.bottom, null, Math.floor((x1 - x0) / (narrow ? 70 : 90)));
+
+  // Crosshair hover: nearest minute.
+  const cross = s("line", { class: "ref-line", x1: 0, x2: 0, y1: m.top, y2: height - m.bottom, visibility: "hidden" });
+  const dot = s("circle", { r: 4, fill: "var(--series-1)", stroke: "var(--panel)", "stroke-width": 2, visibility: "hidden" });
+  gr.append(cross, dot);
+  const hit = s("rect", { class: "hit", x: x0, y: m.top, width: x1 - x0, height: height - m.top - m.bottom });
+  svg.append(hit);
+  const times = inView.map((p) => p[0]);
+  const move = (ev: PointerEvent) => {
+    const r = svg.getBoundingClientRect();
+    const lx = ((ev.clientX - r.left) / r.width) * width;
+    const t = x.invert(lx).getTime();
+    let lo = 0, hi = times.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (times[mid]! < t) lo = mid;
+      else hi = mid;
+    }
+    const p = inView[Math.abs(times[lo]! - t) < Math.abs(times[hi]! - t) ? lo : hi];
+    if (!p) return;
+    const px = x(new Date(p[0]));
+    cross.setAttribute("x1", String(px));
+    cross.setAttribute("x2", String(px));
+    cross.setAttribute("visibility", "visible");
+    if (p[1] !== null) {
+      dot.setAttribute("cx", String(px));
+      dot.setAttribute("cy", String(y(p[1])));
+      dot.setAttribute("visibility", "visible");
+    } else dot.setAttribute("visibility", "hidden");
+    showTip(
+      {
+        title: utc(new Date(p[0])),
+        rows: [
+          ["0.1–0.8 nm", p[1] !== null ? `${xrayClass(p[1])} · ${sci(p[1])}` : "no data"],
+          ["0.05–0.4 nm", p[2] !== null ? sci(p[2]) : "no data"],
+        ],
+      },
+      ev.clientX,
+      ev.clientY,
+    );
+  };
+  hit.addEventListener("pointermove", move);
+  hit.addEventListener("pointerdown", move);
+  hit.addEventListener("pointerleave", () => {
+    cross.setAttribute("visibility", "hidden");
+    dot.setAttribute("visibility", "hidden");
+    hideTip();
+  });
+  el.replaceChildren(svg);
+}
+
+/** Merge a fresh (6-hour) GOES download into the series already shown, keeping 24 h. */
+export function mergeGoes(prev: GoesData | null, next: GoesData): GoesData {
+  if (!prev || next.hours >= prev.hours) return next;
+  const byT = new Map<number, GoesData["points"][number]>();
+  for (const p of prev.points) byT.set(p[0], p);
+  for (const p of next.points) byT.set(p[0], p);
+  const points = [...byT.values()].sort((a, b) => a[0] - b[0]);
+  const cut = points.length ? points[points.length - 1]![0] - prev.hours * 3600_000 : 0;
+  const flares = new Map<string, GoesData["flares"][number]>();
+  for (const f of [...prev.flares, ...next.flares]) flares.set(f.begin, f);
+  if (next.latestFlare) flares.set(next.latestFlare.begin, next.latestFlare);
+  return {
+    satellite: next.satellite ?? prev.satellite,
+    hours: prev.hours,
+    points: points.filter((p) => p[0] >= cut),
+    flares: [...flares.values()].filter((f) => Date.parse(f.max) >= cut && f.end).sort((a, b) => a.max.localeCompare(b.max)),
+    latestFlare: next.latestFlare,
+  };
+}
+
+/* ---------------------------------------------------------------- Two independent feeds */
+
+interface Feed<T> {
+  data: T | null;
+  fetchedAt: string | null;
+  error: { message: string; hint?: string; kind?: string; at: string } | null;
+  upstream: UpstreamCall[];
+  notices: Notice[];
+}
+
+/** DONKI (events) and GOES (live X-rays) load, fail and refresh independently. */
+export interface SolarView {
+  donki: Feed<SolarData>;
+  goes: Feed<GoesData>;
+}
+
+const emptyFeed = <T,>(): Feed<T> => ({ data: null, fetchedAt: null, error: null, upstream: [], notices: [] });
+
+async function runFeed<T>(prev: Feed<T> | undefined, fetcher: () => Promise<Envelope<T>>, merge?: (prev: T | null, next: T) => T): Promise<Feed<T>> {
+  try {
+    const env = await fetcher();
+    return { data: merge ? merge(prev?.data ?? null, env.data) : env.data, fetchedAt: env.fetchedAt, error: null, upstream: env.upstream, notices: env.notices };
+  } catch (err) {
+    if ((err as Error).name === "AbortError") throw err;
+    const api = err instanceof ApiError ? err : null;
+    // Keep the previous data (shown as stale) and record why the update failed.
+    return {
+      ...(prev ?? emptyFeed<T>()),
+      error: { message: api?.message ?? (err as Error).message, hint: api?.body?.error.hint, kind: api?.body?.error.kind, at: new Date().toISOString() },
+      upstream: api?.body?.upstream ?? [],
+    };
+  }
+}
+
+const GOES_EVERY = 60_000;
+
+function errorInline(title: string, f: Feed<unknown>, actions: HTMLElement[]): HTMLElement {
+  return h(
+    "div",
+    { class: "error-state inline", role: "alert" },
+    h("div", null, h("h3", null, title), h("p", null, f.error?.message ?? ""), f.error?.hint ? h("p", { class: "hint" }, f.error.hint) : null, actions.length ? h("div", { class: "error-actions" }, actions) : null),
+  );
+}
+
+function xrayBlock(g: GoesData, staleNote: string | null, hours: { value: number }): { el: HTMLElement; redraw(g: GoesData, staleNote: string | null): void; destroy(): void } {
+  const chart = h("div", { class: "chart" });
+  const now = h("div", { class: "xray-now" });
+  const note = h("p", { class: "footnote xray-stale" });
+  const seg = h("div", { class: "segmented", role: "group", "aria-label": "X-ray time range" });
+  let data = g;
+  let width = 0;
+  const draw = () => width && drawXray(chart, data, width, hours.value);
+  for (const [v, label] of [[6, "6 h"], [24, "24 h"]] as [number, string][]) {
+    const b = h("button", { type: "button", "aria-pressed": String(hours.value === v) }, label);
+    b.addEventListener("click", () => {
+      hours.value = v;
+      seg.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      draw();
+    });
+    seg.append(b);
+  }
+  const fill = () => {
+    const lp = latestPoint(data);
+    const max = data.points.reduce<[number, number] | null>((mx, p) => (p[1] !== null && (!mx || p[1] > mx[1]) ? [p[0], p[1]] : mx), null);
+    const r = lp ? rScale(lp[1]) : 0;
+    now.replaceChildren(
+      h("div", { class: "xray-reading" }, h("span", { class: "stat-label" }, "X-ray level now"), h("span", { class: "xray-class" }, lp ? xrayClass(lp[1]) : "—"), lp ? h("span", { class: "status-tag", style: `--tag:${severityColor(r)}` }, r ? `R${r} radio blackout` : "below R1") : null),
+      h("div", { class: "xray-meta" }, lp ? `${utc(new Date(lp[0]))} · ${sci(lp[1])}` : "no recent reading", max ? h("span", null, ` · ${data.hours} h peak ${xrayClass(max[1])} at ${utc(new Date(max[0])).replace(" UTC", "")}`) : null),
+    );
+    note.textContent = staleNow ?? "";
+    note.hidden = !staleNow;
+  };
+  let staleNow = staleNote;
+  fill();
+  const off = onResize(chart, (w) => {
+    width = w;
+    draw();
+  });
+  const el = h(
+    "div",
+    { class: "chart-block xray-block" },
+    h("div", { class: "chart-head" }, h("h3", null, `Solar X-rays right now · GOES-${g.satellite ?? "?"}`), h("div", { class: "chart-head-tools" }, h("p", null, "1-minute data from NOAA SWPC"), seg)),
+    now,
+    chart,
+    note,
+    h(
+      "ul",
+      { class: "legend" },
+      h("li", null, h("span", { class: "swatch line", style: "--c:var(--series-1)" }), "0.1–0.8 nm (defines the flare class)"),
+      h("li", null, h("span", { class: "swatch line", style: "--c:var(--other)" }), "0.05–0.4 nm"),
+      h("li", null, h("span", { class: "swatch", style: "--c:var(--other)" }), "flare peak ≥ C1 (yellow/orange/red from M1 = R1, as in the timeline)"),
+    ),
+  );
+  return {
+    el,
+    redraw(next, stale) {
+      data = next;
+      staleNow = stale;
+      fill();
+      draw();
+    },
+    destroy: off,
+  };
+}
+
+function goesStale(f: Feed<GoesData>): string | null {
+  if (!f.error || !f.data) return null;
+  return `Latest X-ray update failed (${utc(f.error.at)}): ${f.error.message} Showing data from ${f.fetchedAt ? utc(f.fetchedAt) : "earlier"}.`;
+}
+
+export const solarPanel: PanelDefinition<SolarView> = {
   id: "solar",
   title: "Solar activity & space weather",
-  subtitle: "Flares, coronal mass ejections and geomagnetic storms, with modelled CME arrivals at Earth",
+  subtitle: "Live X-ray flux, flares, coronal mass ejections and geomagnetic storms, with modelled CME arrivals at Earth",
   icon: ICONS.flare,
   span: "span-12",
-  source: { name: "NASA DONKI (CCMC)", url: "https://ccmc.gsfc.nasa.gov/tools/DONKI/" },
+  source: { name: "NASA DONKI (CCMC) · NOAA SWPC GOES", url: "https://ccmc.gsfc.nasa.gov/tools/DONKI/" },
 
-  controls(host: PanelHost<SolarData>) {
+  live: [
+    { label: "X-ray flux", everyMs: GOES_EVERY, params: { feed: "goes" }, lastUpdate: (r) => r.data.goes.fetchedAt },
+    { label: "solar events (DONKI)", everyMs: 15 * 60_000, params: { feed: "donki" }, lastUpdate: (r) => r.data.donki.fetchedAt },
+  ],
+
+  migrate(snap) {
+    const d = snap.data as Partial<SolarView> & Partial<SolarData>;
+    if (d && "donki" in d && "goes" in d) return snap as PanelResult<SolarView>;
+    // v1 snapshots held DONKI data only.
+    if (d && Array.isArray(d.flares)) {
+      return { ...snap, data: { donki: { data: d as SolarData, fetchedAt: snap.fetchedAt, error: null, upstream: snap.upstream, notices: snap.notices }, goes: emptyFeed<GoesData>() } };
+    }
+    return null;
+  },
+
+  controls(host: PanelHost<SolarView>) {
     const wrap = h("div", { class: "segmented", role: "group", "aria-label": "Time range" });
     const options: [string, string][] = [["7", "7 d"], ["30", "30 d"], ["59", "60 d"]];
     const sync = () => {
       for (const b of wrap.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.days === (host.params.days ?? "30")));
     };
     let touched = false;
+    const shownDays = () => host.result?.data.donki.data?.days;
     host.onChange(() => {
       // Until the user picks a range, mirror the range of whatever data is shown (e.g. a restored snapshot).
-      if (!touched && host.result) host.params.days = String((host.result.data as SolarData).days);
+      if (!touched && shownDays()) host.params.days = String(shownDays());
       sync();
     });
     for (const [days, label] of options) {
@@ -353,18 +672,41 @@ export const solarPanel: PanelDefinition<SolarData> = {
         touched = true;
         host.params.days = days;
         sync();
-        void host.refresh();
+        void host.refresh({ feed: "donki" });
       });
       wrap.append(b);
     }
-    host.params.days = host.result ? String((host.result.data as SolarData).days) : "30";
+    host.params.days = shownDays() ? String(shownDays()) : "30";
     sync();
     return wrap;
   },
 
-  async load(signal, params): Promise<PanelResult<SolarData>> {
-    const env = await fetchSource("solar", params, signal);
-    return { data: env.data, fetchedAt: env.fetchedAt, upstream: env.upstream, notices: env.notices };
+  async load(signal, params, prev): Promise<PanelResult<SolarView>> {
+    const { feed, days, sample } = params;
+    const p = prev?.data;
+    const wantDonki = !p || feed !== "goes";
+    const wantGoes = !p || feed !== "donki";
+    const donkiParams: Record<string, string> = {};
+    if (days) donkiParams.days = days;
+    if (sample) donkiParams.sample = sample;
+    // Live updates fetch only the last 6 hours and merge them into the 24 h already shown.
+    const recentGoes = p?.goes.data && p.goes.fetchedAt && Date.now() - Date.parse(p.goes.fetchedAt) < 5 * 3600_000;
+    const [donki, goes] = await Promise.all([
+      wantDonki ? runFeed(p?.donki, () => fetchSource("solar", donkiParams, signal)) : Promise.resolve(p!.donki),
+      wantGoes ? runFeed(p?.goes, () => fetchSource("goes", { hours: recentGoes ? "6" : "24" }, signal), recentGoes ? mergeGoes : undefined) : Promise.resolve(p!.goes),
+    ]);
+    if (!donki.data && !goes.data && donki.error) {
+      // Nothing to show at all: let the panel show its error state (with the dev sample action).
+      throw new ApiError(donki.error.message, { source: "solar", fetchedAt: donki.error.at, error: { kind: (donki.error.kind as ErrorKind) ?? "upstream", message: donki.error.message, ...(donki.error.hint ? { hint: donki.error.hint } : {}) }, upstream: [...donki.upstream, ...goes.upstream] }, 502);
+    }
+    const stamps = [donki.fetchedAt, goes.fetchedAt].filter((x): x is string => !!x).sort();
+    return {
+      data: { donki, goes },
+      fetchedAt: stamps[stamps.length - 1] ?? new Date().toISOString(),
+      // Each feed's most recent calls (a feed not refetched this time keeps its last ones).
+      upstream: [...donki.upstream, ...goes.upstream],
+      notices: [...donki.notices],
+    };
   },
 
   errorActions(err, ctx) {
@@ -375,90 +717,164 @@ export const solarPanel: PanelDefinition<SolarData> = {
     return [];
   },
 
-  render(root, { data }) {
+  render(root, { data: view }, ctx) {
     const now = Date.now();
-    const a = assess(data, now);
-    const strongest = data.flares.reduce<Flare | null>((m, f) => (!m || f.flux > m.flux ? f : m), null);
-    const mx = data.flares.filter((f) => f.flux >= 1e-5).length;
-    const maxKp = Math.max(0, ...data.storms.map((s) => s.maxKp));
-    const earthCmes = data.cmes.filter((c) => c.earth?.arrival).sort((x, y) => x.earth!.arrival!.localeCompare(y.earth!.arrival!));
-    const nextArrival = earthCmes.find((c) => new Date(c.earth!.arrival!).getTime() > now);
-
+    const data = view.donki.data;
+    const goes = view.goes.data;
     const stat = (label: string, value: Node | string, detail: string) =>
       h("div", { class: "stat" }, h("div", { class: "stat-label" }, label), h("div", { class: "stat-value" }, value), h("div", { class: "stat-detail", title: detail }, detail));
+    const cleanups: (() => void)[] = [];
 
-    root.append(
-      h("p", { class: "headline" }, h("span", { class: "status-tag", style: `--tag:${a.level.color}` }, a.level.label), h("span", null, a.text)),
-      h(
-        "div",
-        { class: "stats" },
-        stat(`Strongest flare · ${data.days} d`, strongest ? strongest.classType : "—", strongest ? `${utc(strongest.peak)}${strongest.region ? ` · AR ${strongest.region}` : ""}` : "no flares"),
-        stat("M- and X-class flares", String(mx), "R1 radio blackout or stronger"),
-        stat("CMEs", String(data.cmes.length), `${data.cmes.filter((c) => c.earth).length} modelled to reach Earth`),
-        stat("Max Kp", maxKp ? fmt.fixed(maxKp, 1) : "< 5", maxKp ? `${gLabel(maxKp)} storm` : "no storms catalogued"),
-        stat("Next CME arrival", nextArrival ? relative(nextArrival.earth!.arrival!, now) : "none", nextArrival ? `${utc(nextArrival.earth!.arrival!)} · Kp ${nextArrival.earth!.kpMin ?? "?"}–${nextArrival.earth!.kpMax ?? "?"}` : "no Earth arrivals modelled"),
-      ),
-    );
+    const headline = h("p", { class: "headline" });
+    const fillHeadline = (g: GoesData | null) => {
+      const a = data ? assess(data, now) : null;
+      const lp = g ? latestPoint(g) : null;
+      const flareNow = g?.latestFlare && !g.latestFlare.end ? g.latestFlare : null;
+      const r = lp ? rScale(lp[1]) : 0;
+      const level = LEVELS[Math.max(a?.level.rank ?? 0, Math.min(3, r >= 3 ? 3 : r))]!;
+      const parts: string[] = [];
+      if (flareNow) parts.push(`Flare in progress: ${flareNow.currentClass ?? "rising"} since ${utc(flareNow.begin).replace(" UTC", "")} UTC.`);
+      if (a) parts.push(a.text);
+      else if (lp) parts.push(`X-ray level ${xrayClass(lp[1])}; flare, CME and storm catalogue unavailable right now.`);
+      headline.replaceChildren(h("span", { class: "status-tag", style: `--tag:${level.color}` }, level.label), h("span", null, parts.join(" ")));
+    };
+    fillHeadline(goes);
+    root.append(headline);
 
-    const timeline = h("div", { class: "chart" });
-    const helio = h("div", { class: "chart" });
-    root.append(
-      h(
-        "div",
-        { class: "solar-layout" },
+    let xray: ReturnType<typeof xrayBlock> | null = null;
+    const hours = { value: 24 };
+    const goesSlot = h("div", { class: "xray-slot" });
+    const fillGoes = (f: Feed<GoesData>) => {
+      if (f.data) {
+        if (xray) xray.redraw(f.data, goesStale(f));
+        else {
+          xray = xrayBlock(f.data, goesStale(f), hours);
+          goesSlot.replaceChildren(xray.el);
+        }
+      } else if (f.error) {
+        const retry = h("button", { class: "btn", type: "button" }, icon(ICONS.refresh), "Try again");
+        retry.addEventListener("click", () => ctx.refresh({ feed: "goes" }));
+        goesSlot.replaceChildren(errorInline("Couldn’t load the live X-ray flux.", f, [retry]));
+      }
+    };
+    fillGoes(view.goes);
+    cleanups.push(() => xray?.destroy());
+
+    if (data) {
+      const strongest = data.flares.reduce<Flare | null>((m, f) => (!m || f.flux > m.flux ? f : m), null);
+      const mx = data.flares.filter((f) => f.flux >= 1e-5).length;
+      const maxKp = Math.max(0, ...data.storms.map((s) => s.maxKp));
+      const earthCmes = data.cmes.filter((c) => c.earth?.arrival).sort((x, y) => x.earth!.arrival!.localeCompare(y.earth!.arrival!));
+      const nextArrival = earthCmes.find((c) => new Date(c.earth!.arrival!).getTime() > now);
+      root.append(
         h(
           "div",
-          { class: "chart-block" },
-          h("div", { class: "chart-head" }, h("h3", null, "Activity timeline"), h("p", null, "Shaded area: modelled arrivals ahead")),
-          timeline,
-          h(
-            "ul",
-            { class: "legend" },
-            h("li", null, h("span", { class: "swatch", style: "--c:var(--other)" }), "Below R1 / G1"),
-            h("li", null, h("span", { class: "swatch", style: "--c:var(--warning)" }), "R1 · G1 (minor)"),
-            h("li", null, h("span", { class: "swatch", style: "--c:var(--serious)" }), "R2 · G2 (moderate)"),
-            h("li", null, h("span", { class: "swatch", style: "--c:var(--critical)" }), "R3+ · G3+ (strong)"),
-            h("li", null, h("span", { class: "swatch", style: "--c:var(--series-3)" }), "CME modelled to reach Earth (◆ = predicted arrival, bar = Kp range)"),
-            h("li", null, h("span", { class: "swatch", style: "--c:var(--series-1)" }), "Other CME"),
-            h("li", null, h("span", { class: "swatch", style: "--c:var(--other)" }), "CME, direction unknown"),
-          ),
+          { class: "stats" },
+          stat(`Strongest flare · ${data.days} d`, strongest ? strongest.classType : "—", strongest ? `${utc(strongest.peak)}${strongest.region ? ` · AR ${strongest.region}` : ""}` : "no flares"),
+          stat("M- and X-class flares", String(mx), "R1 radio blackout or stronger"),
+          stat("CMEs", String(data.cmes.length), `${data.cmes.filter((c) => c.earth).length} modelled to reach Earth`),
+          stat("Max Kp", maxKp ? fmt.fixed(maxKp, 1) : "< 5", maxKp ? `${gLabel(maxKp)} storm` : "no storms catalogued"),
+          stat("Next CME arrival", nextArrival ? relative(nextArrival.earth!.arrival!, now) : "none", nextArrival ? `${utc(nextArrival.earth!.arrival!)} · Kp ${nextArrival.earth!.kpMin ?? "?"}–${nextArrival.earth!.kpMax ?? "?"}` : "no Earth arrivals modelled"),
         ),
+      );
+    }
+    root.append(goesSlot);
+
+    if (data) {
+      const earthCmes = data.cmes.filter((c) => c.earth?.arrival).sort((x, y) => x.earth!.arrival!.localeCompare(y.earth!.arrival!));
+      const timeline = h("div", { class: "chart" });
+      const helio = h("div", { class: "chart" });
+      const donkiStale = view.donki.error
+        ? h("p", { class: "footnote xray-stale" }, `Latest DONKI update failed (${utc(view.donki.error.at)}): ${view.donki.error.message} Showing events from ${view.donki.fetchedAt ? utc(view.donki.fetchedAt) : "earlier"}.`)
+        : null;
+      root.append(
+        donkiStale ?? "",
         h(
           "div",
-          { class: "solar-side" },
+          { class: "solar-layout" },
           h(
             "div",
             { class: "chart-block" },
-            h("div", { class: "chart-head" }, h("h3", null, "CMEs in transit now")),
-            helio,
-            h("p", { class: "footnote" }, "Seen from above the Sun’s north pole; Earth fixed at right. Fronts are extrapolated at constant speed from the catalogued analysis, so treat positions as rough."),
+            h("div", { class: "chart-head" }, h("h3", null, "Activity timeline"), h("p", null, "Shaded area: modelled arrivals ahead")),
+            timeline,
+            h(
+              "ul",
+              { class: "legend" },
+              h("li", null, h("span", { class: "swatch", style: "--c:var(--other)" }), "Below R1 / G1"),
+              h("li", null, h("span", { class: "swatch", style: "--c:var(--warning)" }), "R1 · G1 (minor)"),
+              h("li", null, h("span", { class: "swatch", style: "--c:var(--serious)" }), "R2 · G2 (moderate)"),
+              h("li", null, h("span", { class: "swatch", style: "--c:var(--critical)" }), "R3+ · G3+ (strong)"),
+              h("li", null, h("span", { class: "swatch", style: "--c:var(--series-3)" }), "CME modelled to reach Earth (◆ = predicted arrival, bar = Kp range)"),
+              h("li", null, h("span", { class: "swatch", style: "--c:var(--series-1)" }), "Other CME"),
+              h("li", null, h("span", { class: "swatch", style: "--c:var(--other)" }), "CME, direction unknown"),
+            ),
+          ),
+          h(
+            "div",
+            { class: "solar-side" },
+            h(
+              "div",
+              { class: "chart-block" },
+              h("div", { class: "chart-head" }, h("h3", null, "CMEs in transit now")),
+              helio,
+              h("p", { class: "footnote" }, "Seen from above the Sun’s north pole; Earth fixed at right. Fronts are extrapolated at constant speed from the catalogued analysis, so treat positions as rough."),
+            ),
           ),
         ),
-      ),
-      h("div", { class: "solar-lists" }, ...sideLists(data, now, earthCmes)),
-      h("p", { class: "footnote" }, "Flare classes: GOES 1–8 Å peak flux (A < B < C < M < X, each 10× stronger). R = NOAA radio-blackout scale; G = geomagnetic-storm scale (Kp 5 = G1 … Kp 9 = G5). CME arrivals and Kp ranges come from WSA-ENLIL model runs."),
+        h("div", { class: "solar-lists" }, ...sideLists(data, now, earthCmes)),
+      );
+      cleanups.push(
+        onResize(timeline, (w) => drawTimeline(timeline, data, w)),
+        onResize(helio, (w) => drawHeliosphere(helio, data, w)),
+      );
+    } else {
+      const actions: HTMLElement[] = [];
+      const retry = h("button", { class: "btn", type: "button" }, icon(ICONS.refresh), "Try again");
+      retry.addEventListener("click", () => ctx.refresh({ feed: "donki" }));
+      actions.push(retry);
+      const kind = view.donki.error?.kind;
+      if (ctx.env === "development" && (kind === "timeout" || kind === "unreachable")) {
+        const sampleBtn = h("button", { class: "btn", type: "button" }, "Preview with saved sample (9 Oct 2026)");
+        sampleBtn.addEventListener("click", () => ctx.refresh({ feed: "donki", sample: "1" }));
+        actions.push(sampleBtn);
+      }
+      root.append(errorInline("Couldn’t load flares, CMEs and storms (NASA DONKI).", view.donki, actions));
+    }
+    root.append(
+      h("p", { class: "footnote" }, "Flare classes: GOES 1–8 Å (0.1–0.8 nm) peak flux (A < B < C < M < X, each 10× stronger). R = NOAA radio-blackout scale; G = geomagnetic-storm scale (Kp 5 = G1 … Kp 9 = G5). CME arrivals and Kp ranges come from WSA-ENLIL model runs. Live X-ray data: NOAA SWPC, primary GOES satellite; around the equinoxes the satellite passes through Earth’s shadow once a day, so the flux drops to zero and shows as a data gap."),
     );
 
-    const offA = onResize(timeline, (w) => drawTimeline(timeline, data, w));
-    const offB = onResize(helio, (w) => drawHeliosphere(helio, data, w));
-    return () => {
-      offA();
-      offB();
+    let shownDonki = view.donki;
+    return {
+      destroy: () => cleanups.forEach((f) => f()),
+      update(result) {
+        // Only the GOES feed changed (live mode): redraw the X-ray block and the headline in place.
+        if (result.data.donki !== shownDonki && JSON.stringify(result.data.donki) !== JSON.stringify(shownDonki)) return false;
+        if (!xray && result.data.goes.data) return false;
+        shownDonki = result.data.donki;
+        fillGoes(result.data.goes);
+        fillHeadline(result.data.goes.data);
+        return true;
+      },
     };
   },
 
-  summarize({ data }) {
+  summarize({ data: view }) {
     const now = Date.now();
+    const data = view.donki.data;
+    const lp = view.goes.data ? latestPoint(view.goes.data) : null;
+    const xr = lp ? `X-ray ${xrayClass(lp[1])} now` : null;
+    if (!data) return xr ? { label: "Sun & space weather", icon: ICONS.flare, value: xr, detail: "flare/CME catalogue unavailable" } : null;
     const a = assess(data, now);
     const top = data.flares.reduce<Flare | null>((m, f) => (!m || f.flux > m.flux ? f : m), null);
     const next = a.upcoming[0];
     return {
       label: "Sun & space weather",
       icon: ICONS.flare,
-      value: `${a.level.label}${top ? ` · ${top.classType} max` : ""}`,
+      value: `${a.level.label}${xr ? ` · ${xr.replace(" now", "")}` : top ? ` · ${top.classType} max` : ""}`,
       detail: next
         ? `CME due ${relative(next.earth!.arrival!, now)}${next.earth!.kpMax !== null ? ` · Kp ${next.earth!.kpMin}–${next.earth!.kpMax}` : ""}`
-        : `${data.cmes.length} CMEs, ${data.flares.length} flares in ${data.days} d`,
+        : `${data.cmes.length} CMEs, ${data.flares.length} flares in ${data.days} d${top ? ` · max ${top.classType}` : ""}`,
     };
   },
 };

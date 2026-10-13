@@ -6,7 +6,7 @@
  * touch one Worker module, never the visualizations.
  */
 
-export type SourceId = "neo" | "solar" | "exoplanets" | "apod";
+export type SourceId = "neo" | "solar" | "exoplanets" | "apod" | "gcn" | "telescopes" | "goes";
 
 export type KeyMode = "secret" | "demo";
 
@@ -253,9 +253,151 @@ export interface ApodData {
   recent: ApodEntry[];
 }
 
+/* ------------------------------------------------------------------ */
+/* Cosmic explosions (NASA GCN Circulars)                              */
+/* ------------------------------------------------------------------ */
+
+export type GcnEventType = "grb" | "neutrino" | "gw";
+
+/** A sky position extracted from a circular's text. */
+export interface GcnPosition {
+  ra: number;
+  dec: number;
+  /** 90% error radius in degrees, when the circular states one. */
+  errDeg: number | null;
+  /** Circular the position was taken from. */
+  circularId: number;
+  /** Short description of where it came from, e.g. "Swift-XRT" (derived from the subject). */
+  from: string;
+}
+
+export interface GcnCircularRef {
+  id: number;
+  subject: string;
+  /** Submission time; only known for circulars whose text was read (the archive list has no dates). */
+  createdOn: string | null;
+}
+
+export interface GcnEvent {
+  /** Canonical name, e.g. "GRB 261013A", "IceCube-261012A", "S251117dq". */
+  name: string;
+  type: GcnEventType;
+  aliases: string[];
+  /** Event date from its designation (UTC day), ISO. */
+  date: string;
+  /** Trigger time when a circular states it; otherwise null (only the day is known). */
+  triggerTime: string | null;
+  position: GcnPosition | null;
+  /** Gravitational waves: localization area and source classification from LVK circulars. */
+  gw: { areaDeg2: number | null; classification: string | null; skymapUrl: string } | null;
+  /** All circulars about this event within the window, newest first. */
+  circulars: GcnCircularRef[];
+}
+
+export interface GcnData {
+  days: number;
+  windowStart: string;
+  /** Total circulars in the window (all topics). */
+  totalCirculars: number;
+  /** Circulars whose text was read to find positions (limited per refresh by the free plan). */
+  bodiesRead: number;
+  events: GcnEvent[];
+}
+
+/** One circular, as shown in the reader. */
+export interface GcnCircular {
+  id: number;
+  subject: string;
+  eventId: string | null;
+  /** Submitter's name and affiliation (e-mail addresses are removed). */
+  submitter: string;
+  createdOn: string | null;
+  body: string;
+  url: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Space telescopes (STScI published schedules)                        */
+/* ------------------------------------------------------------------ */
+
+export type TelescopeId = "JWST" | "HST";
+
+export type PositionSource = "mast-planned" | "mast" | "name" | "sesame";
+
+export interface ScheduledObservation {
+  /** JWST visit id ("13006:8:1") or HST scheduling unit ("18061 54"). */
+  id: string;
+  program: string;
+  start: string;
+  end: string;
+  target: string;
+  instrument: string;
+  /** JWST: science category (e.g. "Galaxy"); HST: null. */
+  category: string | null;
+  keywords: string | null;
+  /** HST: principal investigator and proposal title from the timeline report. */
+  pi: string | null;
+  title: string | null;
+  /** science = fixed target on the sky; calibration = sky calibration target; moving = Solar System target. */
+  kind: "science" | "calibration" | "moving";
+  ra: number | null;
+  dec: number | null;
+  posSource: PositionSource | null;
+  /** Position derived from a coarse target name (e.g. "J2150-4652"), good to about a degree. */
+  posApprox: boolean;
+}
+
+export interface TelescopeSchedule {
+  telescope: TelescopeId;
+  /** null when the schedule was read and validated; otherwise why it is not shown. */
+  error: { kind: "unreachable" | "format" | "stale"; message: string } | null;
+  /** The published files used. */
+  files: { url: string; label: string }[];
+  coverageStart: string | null;
+  coverageEnd: string | null;
+  observations: ScheduledObservation[];
+  /** Internal calibrations without a sky position (darks, biases, lamps), not listed. */
+  internalCount: number;
+  /** Positions found / rejected by the Sun-angle check. */
+  positions: { found: number; rejected: number };
+}
+
+export interface TelescopeData {
+  windowStart: string;
+  windowEnd: string;
+  schedules: TelescopeSchedule[];
+}
+
+/* ------------------------------------------------------------------ */
+/* GOES X-ray flux (NOAA SWPC, 1-minute data)                          */
+/* ------------------------------------------------------------------ */
+
+export interface GoesFlare {
+  begin: string;
+  max: string;
+  end: string | null;
+  maxClass: string;
+  maxFlux: number;
+}
+
+export interface GoesData {
+  satellite: number | null;
+  /** Hours of data requested (6 or 24). */
+  hours: number;
+  /** [time ms, 0.1–0.8 nm flux, 0.05–0.4 nm flux] in W/m², oldest first. */
+  points: [number, number | null, number | null][];
+  /** Flares in the window (completed and in progress), from SWPC's flare list. */
+  flares: GoesFlare[];
+  /** SWPC's current flare summary (in progress when `end` is null). */
+  latestFlare: (GoesFlare & { currentClass: string | null }) | null;
+}
+
 export type SourceDataMap = {
   neo: NeoData;
   solar: SolarData;
   exoplanets: ExoplanetData;
   apod: ApodData;
+  gcn: GcnData;
+  telescopes: TelescopeData;
+  goes: GoesData;
 };

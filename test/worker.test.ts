@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Notice } from "../shared/contract";
 import { apodSource, apodToday, cleanExplanation, feedItemDate, fromBasic, isPlaceholderLegacy, parseFeed, sizedImage } from "../worker/sources/apod";
 import { Upstream } from "../worker/lib/upstream";
 import { diameterFromH, jdToIso, parseCad } from "../worker/sources/neo";
@@ -168,7 +169,7 @@ describe("APOD source selection", () => {
     });
   }
   const run = (now: Date) => {
-    const notices: { level: string; text: string }[] = [];
+    const notices: Notice[] = [];
     return apodSource.load({ env: {} as never, upstream: new Upstream(), params: new URLSearchParams(), now, notices }).then((data) => ({ data, notices }));
   };
   afterEach(() => vi.unstubAllGlobals());

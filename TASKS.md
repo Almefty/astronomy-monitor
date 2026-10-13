@@ -1,9 +1,72 @@
 # Task list
 
-**Current state (2026-10-11):** Version 1 is complete and live at https://astronomy-monitor.almefty.workers.dev
-(Cloudflare Workers Builds deploys every push to `main`; private repo `Almefty/astronomy-monitor`; `NASA_API_KEY`
-set as a Worker secret). All four panels verified on the live site with live data. 19 unit tests pass.
-Next: version 2 (see "Later versions" at the bottom).
+**Current state (2026-10-13):** Version 2 built and verified locally (light/dark, 1440/375/360 px, production
+build + CSP); being deployed. Adds cosmic explosions (GCN Circulars), space telescopes (Webb/Hubble schedules)
+and live mode with real-time GOES X-rays. 61 unit tests pass. Version 1 notes below still apply.
+Next: version 3 (3D Solar System, see "Later versions").
+
+# Version 2
+
+Status: `[x]` done · `[~]` in progress · `[ ]` to do
+
+## Source verification (live, 2026-10-13)
+- [x] NASA GCN Circulars: archive list via the archive page's data route
+      (`/circulars?startDate=YYYY-MM-DD&limit=100&page=N&_data=routes%2Fcirculars._archive._index` → `{items:[{circularId,subject}],totalPages,totalItems}`),
+      HTML list as fallback; official per-circular JSON `/circulars/<id>.json` (eventId, subject, body, createdOn,
+      submitter). No CORS, so it goes through the Worker. ~130 circulars/week. No GW circulars since Nov 2025.
+- [x] STScI JWST weekly reports (`_documents/YYYYMMDD_report_YYYYMMDD.txt`, linked from the schedules page,
+      newest first; fixed-width with header + dashed separator; no coordinates)
+- [x] STScI HST weekly timelines (`/ftp/observing/weekly_timeline/timeline_MM_DD_YY`, ~200 KB; "SMS Start … End"
+      coverage line; fixed-width; proposal titles at the end; no coordinates)
+- [x] MAST `Mast.Caom.Filtered` (POST form `request=`): JWST planned observations (`calib_level = -1`) have
+      `s_ra/s_dec` for scheduled targets (61/63 on 13 Oct); HST has no planned observations, only earlier ones
+- [x] CDS Sesame batch resolver (`nph-sesame/-o/SNV?name1&name2…`, text `%J ra dec`), sometimes slow (2–37 s)
+- [x] NOAA SWPC GOES `json/goes/primary/xrays-{6-hour,1-day}.json` (1-min, both channels, `cache-control: max-age=60`,
+      CORS *), `xray-flares-latest.json`, `xray-flares-7-day.json`
+
+## Build
+- [x] Shared contract types (gcn, telescopes, goes) and `shared/astro.ts` (Sun position, separations, small circles)
+- [x] Worker: `lib/coords.ts` — strict position parser for circular text (decimal, sexagesimal, IceCube ±,
+      instrument attribution per paragraph) and for target names (J-names, 2MASS, SDSS, DW…P/M…)
+- [x] Worker source `gcn`: list → events (aliases, preliminary-name merge) → budgeted body reads (≤ 40) →
+      best consistent position, trigger time, GW area/class; `/api/gcn/circulars/:id` for the reader
+- [x] Worker source `telescopes`: JWST + HST parsers with column detection and full validation; MAST → name →
+      Sesame positions; Sun-angle sanity check; one telescope per request (`?telescope=JWST|HST`)
+- [x] Worker source `goes`: 24 h or 6 h, both channels, SWPC floor/zero values treated as gaps, flare list
+- [x] Panel framework: `load(…, prev)`, quiet refresh (no dimming; on failure keep data + "Live update failed"),
+      in-place `update()`, snapshot `migrate()`, `live` feeds, render context `refresh(params)`
+- [x] Live mode (`core/live.ts`): off by default and not remembered, pauses when hidden/offline, per-feed intervals
+      (GOES 1 min, DONKI 15 min, GCN 10 min), exponential back-off; Live switch + status line
+- [x] Solar panel: DONKI and GOES as independent feeds (own errors, inline retry/sample), live X-ray chart
+      (log flux, class bands, R1 line, flare peaks, flare-in-progress band, data gaps, crosshair, 6 h/24 h),
+      headline includes a flare in progress; v1 snapshots migrated
+- [x] Cosmic explosions panel: stats, type filter, all-sky map with true error circles + Sun, event list,
+      circular reader (dialog, older/newer, arrow keys, linkified URLs, e-mails stripped), table
+- [x] Space telescopes panel: now/next cards, sky map (Webb's 85–135° zone shaded, current targets ringed,
+      click → Aladin), schedule Gantt, table, per-telescope format/stale/unreachable messages; redraws each minute
+- [x] Tests: 61 in total, 42 new (real circulars, real JWST report, real HST timeline excerpt, GOES sample, mocked end-to-end)
+- [x] Verified locally: 1440 px and 375/360 px (no horizontal scroll), light + dark, production build + CSP,
+      live mode on/hidden/off, DONKI failure isolated from GOES
+- [~] Deploy and verify every panel on the live site
+
+## Known issues (v2)
+- GCN positions are machine-read; a circular describing several sources can still mislead (mitigated by the
+  consistency check; the reader is one click away). Events whose only circulars are low-priority (e.g. MASTER
+  reports) may have no position.
+- STScI publishes next week's schedules only a few days ahead. JWST plans are event-driven; times can shift.
+- MAST has no planned observations for Hubble; new Hubble targets rely on names and Sesame (2/48 unplaced on 13 Oct).
+- CPU time per request can't be measured from here; parsers were benchmarked (warm: HST 2–3 ms, JWST < 1 ms,
+  40 circulars 1–4 ms). Check *Workers & Pages → astronomy-monitor → Metrics → CPU time* if errors appear.
+
+## Lessons learned (v2)
+- **GOES eclipse season:** around the equinoxes GOES-18 passes through Earth's shadow daily (~09 UTC); the flux
+  ramps down and SWPC reports 0 (flagged `electron_contaminaton: true`). Values ≤ 1e-9 are SWPC's floor/missing.
+- **Swift circulars report BAT, XRT and UVOT positions in one text** — attribute positions by paragraph, and in
+  ground-based follow-ups label by the subject (instrument names there are citations).
+- **The browser pane counts as a hidden tab** to the page, so live mode is paused there — test by overriding
+  `document.hidden` and dispatching `visibilitychange`.
+- **Python string replacements eat backslashes** (`\b` became a backspace character). Use the Edit tool or raw
+  strings for code with regexes.
 
 # Version 1
 
@@ -91,7 +154,8 @@ Status: `[x]` done · `[~]` in progress · `[ ]` to do
   ("Workers Builds: astronomy-monitor") on the commit, then call the live `/api/...` endpoint.
 
 ## Later versions (structure prepared, not built)
-- [ ] Cosmic explosions (NASA GCN Circulars) on an all-sky map
-- [ ] Webb & Hubble targets on a sky map
-- [ ] Live auto-refresh mode with real-time GOES X-ray data
-- [ ] 3D solar system view
+- [x] Cosmic explosions (NASA GCN Circulars) on an all-sky map — v2
+- [x] Webb & Hubble targets on a sky map — v2
+- [x] Live auto-refresh mode with real-time GOES X-ray data — v2
+- [ ] v3: 3D Solar System with planets and approaching asteroids moving in real time from JPL orbits
+      (hooks: panel registry + lazy `import("three")`, `shared/astro.ts`, `LiveMode.isActive()`/`livechange`; see README)

@@ -23,6 +23,8 @@
   --series-2: #eb6834;
   --series-2-wash: rgba(235, 104, 52, 0.12);
   --series-3: #1baf7a;
+  /* Slot 7 of the validated palette; used only for list tags (never alongside slots 1–3 on a map). */
+  --series-7: #4a3aa7;
   --other: #a3abb5;
 
   --good: #0ca30c;
@@ -67,6 +69,7 @@
     --series-2: #d95926;
     --series-2-wash: rgba(217, 89, 38, 0.16);
     --series-3: #199e70;
+    --series-7: #9085e9;
     --other: #5a6574;
     --sun: #f5b52e;
     --focus: #6aa8f0;
@@ -98,6 +101,7 @@
   --series-2: #d95926;
   --series-2-wash: rgba(217, 89, 38, 0.16);
   --series-3: #199e70;
+  --series-7: #9085e9;
   --other: #5a6574;
   --sun: #f5b52e;
   --focus: #6aa8f0;
