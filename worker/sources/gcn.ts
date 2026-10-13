@@ -412,11 +412,6 @@ export const gcnSource: SourceModule<"gcn"> = {
     } else if (failed) {
       notices.push({ level: "info", text: `${failed} circular${failed > 1 ? "s" : ""} could not be read this time; some positions may be missing.` });
     }
-    const relevant = inWindow.reduce((n, d) => n + d.items.length, 0);
-    const unread = relevant - bodies.size;
-    if (unread > 0 && inWindow.length > BODY_BUDGET / 2) {
-      notices.push({ level: "info", text: `Positions are taken from the ${bodies.size} most informative circulars (a refresh can read up to ${BODY_BUDGET}).` });
-    }
     return {
       days,
       windowStart: start.toISOString(),

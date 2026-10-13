@@ -290,7 +290,7 @@ export const gcnPanel: PanelDefinition<GcnData> = {
       h(
         "p",
         { class: "footnote" },
-        `Positions are read automatically from the circulars’ text: the smallest stated 90% error wins, and a position is only used if it agrees with the coarser ones. ${data.bodiesRead} circular texts were read this time. Always check the circular before relying on a position.`,
+        `Positions are read automatically from the circulars’ text: the smallest stated 90% error wins, and a position is only used if it agrees with the coarser ones. This refresh read ${data.bodiesRead} circular texts — at most 40 per refresh (the free plan’s request limit), most informative first, so with many events some may show “no position read yet”. Always check the circular before relying on a position.`,
       ),
     );
     const off = onResize(map, (w) => {

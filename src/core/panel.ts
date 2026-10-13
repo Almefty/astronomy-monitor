@@ -98,6 +98,8 @@ export class PanelHost<D = unknown> {
   private controller: AbortController | null = null;
   private listeners: Listener[] = [];
   private liveError: string | null = null;
+  /** The view shows a restored snapshot (with its "last data you loaded" note): never update it in place. */
+  private showingRestored = false;
   result: PanelResult<D> | null = null;
   params: Record<string, string> = {};
   busy = false;
@@ -233,7 +235,7 @@ export class PanelHost<D = unknown> {
   /** Render a result. Rendering errors are contained to this panel. */
   show(result: PanelResult<D>, restored: boolean) {
     // In-place update (live mode): same notices, a view that knows how to update.
-    if (!restored && this.view?.update && this.result && JSON.stringify(this.result.notices) === JSON.stringify(result.notices)) {
+    if (!restored && !this.showingRestored && this.view?.update && this.result && JSON.stringify(this.result.notices) === JSON.stringify(result.notices)) {
       try {
         if (this.view.update(result)) {
           this.result = result;
@@ -248,6 +250,7 @@ export class PanelHost<D = unknown> {
     }
     this.destroyView();
     this.result = result;
+    this.showingRestored = restored;
     clear(this.body);
     const content = h("div", { class: "panel-content" });
     const notices = [...result.notices];

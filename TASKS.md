@@ -65,6 +65,8 @@ Status: `[x]` done · `[~]` in progress · `[ ]` to do
 ## Lessons learned (v2)
 - **GOES eclipse season:** around the equinoxes GOES-18 passes through Earth's shadow daily (~09 UTC); the flux
   ramps down and SWPC reports 0 (flagged `electron_contaminaton: true`). Values ≤ 1e-9 are SWPC's floor/missing.
+- **In-place updates must not keep a restored view:** the "Showing the last data you loaded" note lives only in
+  the DOM, so a refresh with unchanged data kept it (fixed 2026-10-14: `PanelHost.showingRestored`).
 - **SWPC occasionally serves a half-written file** (rewritten every minute): seen once on 2026-10-13 18:11 UTC
   ("not JSON (starts with [{"time_tag"…"), 0 of 40 in a follow-up test. The Worker now retries once after
   1.5 s; live mode keeps the previous data if the retry fails too.
