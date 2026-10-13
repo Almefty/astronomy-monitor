@@ -1,8 +1,9 @@
 # Task list
 
-**Current state (2026-10-13):** Version 2 built and verified locally (light/dark, 1440/375/360 px, production
-build + CSP); being deployed. Adds cosmic explosions (GCN Circulars), space telescopes (Webb/Hubble schedules)
-and live mode with real-time GOES X-rays. 61 unit tests pass. Version 1 notes below still apply.
+**Current state (2026-10-13):** Version 2 is live at https://astronomy-monitor.almefty.workers.dev and verified
+there with live data (all six panels, light/dark, 1440/375/360 px, live mode). Adds cosmic explosions (GCN
+Circulars), space telescopes (Webb/Hubble schedules) and live mode with real-time GOES X-rays.
+61 unit tests pass. Version 1 notes below still apply.
 Next: version 3 (3D Solar System, see "Later versions").
 
 # Version 2
@@ -47,7 +48,10 @@ Status: `[x]` done · `[~]` in progress · `[ ]` to do
 - [x] Tests: 61 in total, 42 new (real circulars, real JWST report, real HST timeline excerpt, GOES sample, mocked end-to-end)
 - [x] Verified locally: 1440 px and 375/360 px (no horizontal scroll), light + dark, production build + CSP,
       live mode on/hidden/off, DONKI failure isolated from GOES
-- [~] Deploy and verify every panel on the live site
+- [x] Deployed (Workers Builds); verified on the live site: every panel loads with live data, including DONKI;
+      all new upstreams (GCN, STScI, MAST, CDS Sesame, SWPC) reachable from Cloudflare; heaviest request
+      (GCN 14 d) = 42 upstream calls (limit 50), no CPU-limit errors; reader works (full-screen on phones);
+      live mode refreshes GOES every minute in place and makes no requests while hidden
 
 ## Known issues (v2)
 - GCN positions are machine-read; a circular describing several sources can still mislead (mitigated by the
@@ -64,7 +68,7 @@ Status: `[x]` done · `[~]` in progress · `[ ]` to do
 - **Swift circulars report BAT, XRT and UVOT positions in one text** — attribute positions by paragraph, and in
   ground-based follow-ups label by the subject (instrument names there are citations).
 - **The browser pane counts as a hidden tab** to the page, so live mode is paused there — test by overriding
-  `document.hidden` and dispatching `visibilitychange`.
+  `document.hidden` and dispatching `visibilitychange` (timers are not throttled there; verified 5 s ticks).
 - **Python string replacements eat backslashes** (`\b` became a backspace character). Use the Edit tool or raw
   strings for code with regexes.
 

@@ -82,7 +82,8 @@ export class LiveMode {
         void host.refresh(f.params ?? {}, { quiet: true }).then((ok) => {
           st.inFlight = false;
           st.failures = ok ? 0 : st.failures + 1;
-          st.due = Date.now() + f.everyMs * Math.min(8, 2 ** st.failures);
+          // Count the next slot from when this request started, so the cadence stays at `everyMs`.
+          st.due = now + f.everyMs * Math.min(8, 2 ** st.failures);
         });
       }),
     );
