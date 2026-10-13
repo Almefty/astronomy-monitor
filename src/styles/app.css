@@ -1474,13 +1474,14 @@ a:hover {
 }
 .scope-next li {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr) minmax(0, max-content);
+  grid-template-columns: max-content minmax(0, 1fr) minmax(0, max-content);
   gap: 10px;
   font-size: 13px;
 }
 .scope-next .mono {
   color: var(--ink-3);
   font-size: 12px;
+  white-space: nowrap;
 }
 .scope-next-target {
   overflow: hidden;
