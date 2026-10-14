@@ -36,10 +36,18 @@ The site stays public (portfolio), without Cloudflare Access, on the free plan.
 - [x] APOD: credit & copyright always shown ("see the entry on NASA’s site" when missing), repeated
       "Image Credit:" labels stripped, rights note + "About APOD" link under the filmstrip.
 - [x] Git history scan (17 commits): no secrets, keys, tokens, `.dev.vars` or `dist/` ever committed.
-- [ ] Verify on the live site: second request served from cache (`cf-cache-status: HIT`, unchanged
-      `fetchedAt`, no new upstream calls), static assets unaffected, rate limit behaviour.
+- [x] Deployed (a93787e, Workers Builds success) and verified live: repeated requests return
+      `cf-cache-status: HIT` with a rising `Age` and the **same `fetchedAt`** as the first response (so no
+      Worker run and no upstream calls); `?days=007&junk=…` hits the `days=7` entry; 404 is `no-store`; all six
+      panels load, no console errors; a cached panel shows its true age ("Updated 14:21 · 3 min ago").
+- [~] **Rate limit deployed but not enforcing on the live site:** 400 requests from one IPv6 address in
+      ~20 s all returned 200. Same as workers-sdk#16097 (free plan, workers.dev).
+      Harmless (fails open); it will start working if Cloudflare fixes it. Re-test with a burst of ~400
+      requests to `/api/status`.
 
 ## Lessons learned (hardening)
+- **The cache is per data centre.** Requests from one machine were spread over five
+  different data centres, so "MISS twice in a row" can just mean two colos. Compare `cf-ray` suffixes; check `fetchedAt` on HITs.
 - **Workers Cache applies heuristic lifetimes** when `Cache-Control` is missing (2 h for a 200), so every
   `/api` response states its policy explicitly.
 - **Panels show `fetchedAt`** ("Updated 14:16"), so a cached response is honest about its age.
