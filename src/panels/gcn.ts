@@ -36,8 +36,9 @@ function positionText(e: GcnEvent): string {
   return e.position ? `${errText(e.position.errDeg)} · ${e.position.from}` : "no position read yet";
 }
 
+/** Open the reader: on a given circular, or on the first report (the reader runs oldest → newest). */
 function readEvent(e: GcnEvent, circularId?: number) {
-  const items = e.circulars.map((c) => ({ id: c.id, subject: c.subject }));
+  const items = [...e.circulars].reverse();
   const idx = circularId ? Math.max(0, items.findIndex((c) => c.id === circularId)) : 0;
   openReader(e.name, items, idx);
 }

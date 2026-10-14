@@ -6,7 +6,7 @@ import { fmt, relative, utc } from "../core/format";
 import { ICONS } from "../core/icons";
 import type { PanelDefinition, PanelHost, PanelResult } from "../core/panel";
 import { hoverLayer, placeLabels, svgRoot, timeAxis, yAxis, type HoverPoint, type LabelCandidate } from "../viz/chart";
-import { hideTip, showTip } from "../viz/tooltip";
+import { attachTip, hideTip, showTip } from "../viz/tooltip";
 
 const DAY = 86_400_000;
 const AU_KM = 149_597_870.7;
@@ -343,6 +343,8 @@ const sci = (v: number) => {
   return `${fmt.fixed(v / 10 ** e, 1)}×10${String(e).replace("-", "⁻").replace(/\d/g, (d) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[Number(d)]!)} W/m²`;
 };
 
+const GOES_DELAY_NOTE = "NOAA SWPC publishes GOES 1-minute X-ray data a few minutes after it is measured, so the newest point is always a little behind real time.";
+
 function latestPoint(g: GoesData): [number, number] | null {
   for (let i = g.points.length - 1; i >= 0; i--) {
     const p = g.points[i]!;
@@ -587,11 +589,27 @@ function xrayBlock(g: GoesData, staleNote: string | null, hours: { value: number
     const r = lp ? rScale(lp[1]) : 0;
     now.replaceChildren(
       h("div", { class: "xray-reading" }, h("span", { class: "stat-label" }, "X-ray level now"), h("span", { class: "xray-class" }, lp ? xrayClass(lp[1]) : "—"), lp ? h("span", { class: "status-tag", style: `--tag:${severityColor(r)}` }, r ? `R${r} radio blackout` : "below R1") : null),
-      h("div", { class: "xray-meta" }, lp ? `${utc(new Date(lp[0]))} · ${sci(lp[1])}` : "no recent reading", max ? h("span", null, ` · ${data.hours} h peak ${xrayClass(max[1])} at ${utc(new Date(max[0])).replace(" UTC", "")}`) : null),
+      h("div", { class: "xray-meta" }, lp ? [readingAge(lp[0]), ` · ${sci(lp[1])}`] : "no recent reading", max ? h("span", null, ` · ${data.hours} h peak ${xrayClass(max[1])} at ${utc(new Date(max[0])).replace(" UTC", "")}`) : null),
     );
     note.textContent = staleNow ?? "";
     note.hidden = !staleNow;
   };
+  // The age text ("6 min ago") is kept current while the panel is open; no data is fetched.
+  const readingAge = (t: number) => {
+    const d = new Date(t);
+    const sameDay = utc(d, false) === utc(new Date(), false);
+    const at = sameDay ? utc(d).replace(/^\d+ \w+ /, "") : utc(d);
+    const ageEl = h("button", { type: "button", class: "tip-trigger", "data-age": t, "aria-label": `${relative(d.toISOString())}. ${GOES_DELAY_NOTE}` }, relative(d.toISOString()));
+    attachTip(ageEl, { title: "Why the latest reading lags", note: GOES_DELAY_NOTE });
+    return h("span", null, `latest reading ${at} · `, ageEl);
+  };
+  const tick = window.setInterval(() => {
+    for (const el of now.querySelectorAll<HTMLElement>("[data-age]")) {
+      const iso = new Date(Number(el.dataset.age)).toISOString();
+      el.textContent = relative(iso);
+      el.setAttribute("aria-label", `${relative(iso)}. ${GOES_DELAY_NOTE}`);
+    }
+  }, 30_000);
   let staleNow = staleNote;
   fill();
   const off = onResize(chart, (w) => {
@@ -621,7 +639,10 @@ function xrayBlock(g: GoesData, staleNote: string | null, hours: { value: number
       fill();
       draw();
     },
-    destroy: off,
+    destroy() {
+      off();
+      window.clearInterval(tick);
+    },
   };
 }
 

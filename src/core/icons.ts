@@ -18,6 +18,9 @@ export const ICONS = {
   close: wrap(`<path d="M6 6l12 12M18 6L6 18"/>`),
   prev: wrap(`<path d="M15 5l-7 7 7 7"/>`),
   next: wrap(`<path d="M9 5l7 7-7 7"/>`),
+  first: wrap(`<path d="M17 5l-7 7 7 7M6.5 5v14"/>`),
+  last: wrap(`<path d="M7 5l7 7-7 7M17.5 5v14"/>`),
+  list: wrap(`<path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"/>`),
   doc: wrap(`<path d="M7 3.5h7l4 4V20a.5.5 0 0 1-.5.5h-10.5a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5z"/><path d="M14 3.5V8h4M9 12h6M9 15.5h6"/>`),
   key: wrap(`<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>`),
 } as const;

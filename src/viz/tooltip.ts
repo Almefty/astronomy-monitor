@@ -44,3 +44,27 @@ export function hideTip() {
 }
 
 window.addEventListener("scroll", hideTip, { passive: true });
+
+let fromTrigger = false;
+
+/** Explanatory tooltip on a small trigger element: shown on hover, keyboard focus or tap; hidden on leave/blur. */
+export function attachTip(target: HTMLElement, content: TipContent) {
+  const show = () => {
+    showTipAt(content, target);
+    fromTrigger = true;
+  };
+  target.classList.add("tip-trigger");
+  target.addEventListener("mouseenter", show);
+  target.addEventListener("focus", show);
+  target.addEventListener("click", show);
+  target.addEventListener("mouseleave", hideTip);
+  target.addEventListener("blur", hideTip);
+}
+
+// A tap anywhere else closes a tooltip opened from a trigger (touch has no mouseleave).
+document.addEventListener("pointerdown", (ev) => {
+  if (fromTrigger && !(ev.target instanceof Element && ev.target.closest(".tip-trigger"))) {
+    fromTrigger = false;
+    hideTip();
+  }
+});

@@ -62,12 +62,24 @@ a:hover {
   white-space: nowrap;
   transition: background-color 120ms, border-color 120ms;
 }
-.btn:hover {
+.btn:hover:not(:disabled) {
   background: var(--panel-2);
 }
-.btn:disabled {
+/* Busy (work in progress): keeps its look, shows the progress cursor. */
+.btn.is-busy {
   cursor: progress;
   opacity: 0.7;
+}
+/* Unavailable: faint, flat, no hover — readable as "can't press" at a glance. */
+.btn:disabled:not(.is-busy) {
+  cursor: not-allowed;
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink-3);
+  opacity: 0.5;
+}
+button:disabled:not(.is-busy) {
+  cursor: not-allowed;
 }
 .btn svg {
   width: 16px;
@@ -79,7 +91,7 @@ a:hover {
   border-color: var(--primary-bg);
   color: var(--primary-ink);
 }
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background: var(--primary-bg);
   opacity: 0.88;
 }
@@ -94,7 +106,7 @@ a:hover {
   background: transparent;
   color: var(--ink-2);
 }
-.btn-quiet:hover {
+.btn-quiet:hover:not(:disabled) {
   background: var(--panel-2);
   color: var(--ink);
 }
@@ -1230,6 +1242,17 @@ a:hover {
   color: var(--ink-2);
   font: 12.5px/1.4 var(--font-mono);
 }
+.tip-trigger {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--ink-3);
+  text-underline-offset: 3px;
+}
 .xray-stale {
   color: var(--notice-ink);
   background: var(--notice-bg);
@@ -1385,8 +1408,90 @@ a:hover {
   border-top: 1px solid var(--line);
   flex-wrap: wrap;
 }
+.reader-controls {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+.reader-end {
+  flex: none;
+  width: 36px;
+  height: 36px;
+}
+.reader-pos {
+  flex: none;
+  gap: 6px;
+  padding: 0 10px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.reader-pos[aria-expanded="true"] {
+  background: var(--panel-2);
+  border-color: var(--ink-3);
+}
 .reader-ext {
   margin-left: auto;
+}
+/* Jump list: replaces the circular text while open. */
+.reader-jump {
+  flex: 1;
+  overflow: auto;
+  min-height: 160px;
+  padding: 6px 0;
+}
+.jump-note {
+  margin: 4px 18px 8px;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+.jump-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.jump-item {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 18px;
+  border: 0;
+  border-left: 3px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.jump-item:hover,
+.jump-item:focus-visible {
+  background: var(--panel-2);
+}
+.jump-item[aria-current] {
+  border-left-color: var(--series-1);
+  background: var(--series-1-wash);
+}
+.jump-num {
+  flex: none;
+  min-width: 2.2em;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: right;
+}
+.jump-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.jump-subject {
+  font-size: 13.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.jump-meta {
+  color: var(--ink-3);
+  font-size: 12px;
 }
 
 /* ---------------------------------------------------------------- v2: Space telescopes */
@@ -1643,6 +1748,24 @@ a:hover {
     height: 100dvh;
     max-height: 100dvh;
     border-radius: 0;
+  }
+  .reader-nav {
+    padding: 10px 14px;
+  }
+  .reader-controls {
+    flex: 1 1 100%;
+  }
+  .reader-step {
+    flex: 1;
+    min-width: 0;
+    justify-content: center;
+    padding: 0 8px;
+  }
+  .reader-ext {
+    margin-left: 0;
+  }
+  .jump-item {
+    padding: 10px 14px;
   }
   .panel-head {
     flex-wrap: wrap;

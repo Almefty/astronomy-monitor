@@ -6,6 +6,10 @@ Circulars), space telescopes (Webb/Hubble schedules) and live mode with real-tim
 61 unit tests pass. Version 1 notes below still apply.
 **2026-10-14:** hardening for a public site — Workers Cache on `/api`, per-client rate limit, safer links and
 embeds, APOD credits always shown (see "Hardening"). 72 unit tests pass.
+**2026-10-14 (UI fixes):** unavailable buttons look unavailable (faint, flat, `not-allowed`, no hover; only
+`.is-busy` shows the progress cursor); GOES shows the latest reading's age with a tooltip on NOAA's delay;
+the circular reader runs oldest → newest (1 = first report) with first/newest, a position button and a
+jump list. The GCN archive list has no dates, so the jump list shows dates only for circulars already read.
 Next: version 3 (3D Solar System, see "Later versions").
 
 # Hardening (2026-10-14)
