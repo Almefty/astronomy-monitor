@@ -35,9 +35,23 @@ const tickClock = () => {
 tickClock();
 setInterval(tickClock, 1000);
 
-const themeGroup = h("div", { class: "segmented", role: "group", "aria-label": "Colour theme" });
+const themeGroup = h("div", { class: "segmented theme-group", role: "group", "aria-label": "Colour theme" });
 const themes: [ThemeChoice, string, string][] = [["auto", ICONS.auto, "Match system"], ["light", ICONS.sun, "Light"], ["dark", ICONS.moon, "Dark"]];
-const syncTheme = () => themeGroup.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.theme === currentChoice())));
+const themeCycle = h("button", { type: "button", class: "btn btn-icon theme-cycle" });
+const syncTheme = () => {
+  themeGroup.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.theme === currentChoice())));
+  const i = themes.findIndex(([c]) => c === currentChoice());
+  const [, svg, label] = themes[i]!;
+  const nextLabel = themes[(i + 1) % themes.length]![2];
+  themeCycle.replaceChildren(icon(svg));
+  themeCycle.setAttribute("aria-label", `Theme: ${label}. Switch to ${nextLabel}`);
+  themeCycle.title = `Theme: ${label} (tap for ${nextLabel})`;
+};
+themeCycle.addEventListener("click", () => {
+  const i = themes.findIndex(([c]) => c === currentChoice());
+  applyTheme(themes[(i + 1) % themes.length]![0]);
+  syncTheme();
+});
 for (const [choice, svg, label] of themes) {
   const b = h("button", { type: "button", "data-theme": choice, title: label, "aria-label": label }, icon(svg));
   b.addEventListener("click", () => {
@@ -110,7 +124,7 @@ const topbar = h(
     { class: "topbar-inner" },
     h("div", { class: "app-label" }, "Astronomy Monitor"),
     clock,
-    h("div", { class: "topbar-actions" }, themeGroup, liveBtn, refreshAllBtn),
+    h("div", { class: "topbar-actions" }, themeGroup, themeCycle, liveBtn, refreshAllBtn),
   ),
 );
 

@@ -205,6 +205,10 @@ button:disabled:not(.is-busy) {
   align-items: center;
   gap: 10px;
 }
+/* Single theme button (auto → light → dark) replaces the three-way control on phones. */
+.theme-cycle {
+  display: none;
+}
 
 .notice-bar {
   margin: 14px 0 0;
@@ -696,8 +700,16 @@ button:disabled:not(.is-busy) {
 }
 .legend li {
   display: inline-flex;
-  align-items: center;
+  /* Markers sit on the first line of text, not the middle of a wrapped block. */
+  align-items: flex-start;
   gap: 6px;
+  line-height: 18px;
+}
+.legend li > .swatch {
+  margin-top: 4px;
+}
+.legend li > .swatch.line {
+  margin-top: 8px;
 }
 .swatch {
   width: 10px;
@@ -1146,7 +1158,8 @@ button:disabled:not(.is-busy) {
 .live-status {
   display: flex;
   gap: 8px;
-  align-items: baseline;
+  align-items: flex-start;
+  line-height: 19px;
   margin: -4px 0 12px;
   color: var(--ink-2);
   font-size: 13px;
@@ -1155,7 +1168,7 @@ button:disabled:not(.is-busy) {
   display: none;
 }
 .live-status .live-dot {
-  align-self: center;
+  margin-top: 5px;
 }
 .live-status strong {
   color: var(--ink);
@@ -1716,6 +1729,18 @@ button:disabled:not(.is-busy) {
   }
   .clock {
     display: none;
+  }
+  .topbar-actions .theme-group {
+    display: none;
+  }
+  .theme-cycle {
+    display: inline-flex;
+    width: 36px;
+    height: 36px;
+  }
+  .app-label {
+    white-space: normal;
+    line-height: 1.15;
   }
   .btn-label-long {
     display: none;
