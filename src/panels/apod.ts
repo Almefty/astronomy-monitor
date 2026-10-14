@@ -11,8 +11,9 @@ function embedUrl(url: string): string | null {
   const safe = safeUrl(url);
   if (!safe) return null;
   const u = new URL(safe);
-  if (/(^|\.)youtube\.com$/.test(u.hostname)) u.hostname = "www.youtube-nocookie.com";
-  if (!/(youtube-nocookie\.com|player\.vimeo\.com)$/.test(u.hostname)) return null;
+  if (/^(www\.|m\.)?youtube\.com$/.test(u.hostname)) u.hostname = "www.youtube-nocookie.com";
+  if (!/^(www\.youtube-nocookie\.com|player\.vimeo\.com)$/.test(u.hostname)) return null;
+  u.protocol = "https:";
   return u.toString();
 }
 
@@ -28,7 +29,10 @@ function media(e: ApodEntry): HTMLElement {
     }
     const src = embedUrl(e.videoUrl);
     if (src) {
-      box.append(h("iframe", { src, title: e.title, loading: "lazy", allow: "fullscreen; picture-in-picture", referrerpolicy: "strict-origin-when-cross-origin" }));
+      // Sandboxed: the players need scripts and their own origin (cookies-free YouTube, Vimeo) and may
+      // open "Watch on YouTube/Vimeo" in a new tab, but can't navigate this page or open dialogs.
+      const sandbox = "allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox";
+      box.append(h("iframe", { sandbox, src, title: e.title, loading: "lazy", allow: "fullscreen; picture-in-picture; encrypted-media", referrerpolicy: "strict-origin-when-cross-origin" }));
       return box;
     }
   }
@@ -58,7 +62,13 @@ function entryView(e: ApodEntry): HTMLElement {
     null,
     media(e),
     h("h3", { class: "apod-title" }, e.title),
-    h("div", { class: "apod-meta" }, h("span", { class: "mono" }, dateLabel(e.date)), e.credit ? h("span", null, `Credit: ${e.credit}`) : null),
+    h(
+      "div",
+      { class: "apod-meta" },
+      h("span", { class: "mono" }, dateLabel(e.date)),
+      // Always shown: most APOD images are copyrighted by their authors, not NASA.
+      h("span", null, e.credit ? `Image credit & copyright: ${e.credit}` : "Image credit & copyright: see the entry on NASA’s site"),
+    ),
     text,
     h(
       "div",
@@ -105,6 +115,14 @@ export const apodPanel: PanelDefinition<ApodData> = {
     }
     root.append(holder);
     if (data.recent.length > 1) root.append(strip);
+    root.append(
+      h(
+        "p",
+        { class: "apod-rights" },
+        "Pictures, videos and explanations are shown as published by NASA’s Astronomy Picture of the Day. Each image belongs to the credited author and may be copyrighted; it is not covered by this project’s license. ",
+        h("a", { href: "https://science.nasa.gov/apod/about-apod/", target: "_blank", rel: "noopener" }, "About APOD"),
+      ),
+    );
     select(data.today);
   },
 

@@ -165,7 +165,7 @@ describe("telescope source end-to-end (mocked network)", () => {
       if (url.includes("sesame")) return new Response("");
       return new Response("nope", { status: 404 });
     });
-    const data = await telescopeSource.load({ env: {} as never, upstream: new Upstream(), params: new URLSearchParams(), now: new Date("2026-10-14T00:00:00Z"), notices: [] });
+    const data = await telescopeSource.load({ env: {} as never, upstream: new Upstream(), params: new URLSearchParams(), now: new Date("2026-10-14T00:00:00Z"), notices: [], noCache: () => {} });
     const [jwst, hst] = data.schedules;
     expect(jwst!.error).toBeNull();
     const kepler = jwst!.observations.find((o) => o.target === "Kepler-89")!;
@@ -207,7 +207,7 @@ describe("GOES X-ray flux", () => {
       urls.push(url);
       return Response.json(url.includes("xrays-") ? xrays : flaresLatest);
     });
-    const d = await goesSource.load({ env: {} as never, upstream: new Upstream(), params: new URLSearchParams("hours=6"), now: new Date(), notices: [] });
+    const d = await goesSource.load({ env: {} as never, upstream: new Upstream(), params: new URLSearchParams("hours=6"), now: new Date(), notices: [], noCache: () => {} });
     expect(urls.some((u) => u.endsWith("xrays-6-hour.json"))).toBe(true);
     expect(urls.some((u) => u.includes("7-day"))).toBe(false);
     expect(d.latestFlare?.currentClass).toBe("B6.7");
@@ -226,13 +226,13 @@ describe("GOES truncated files", () => {
       return Response.json(flaresLatest);
     });
     const up = new Upstream();
-    const d = await goesSource.load({ env: {} as never, upstream: up, params: new URLSearchParams("hours=6"), now: new Date(), notices: [] });
+    const d = await goesSource.load({ env: {} as never, upstream: up, params: new URLSearchParams("hours=6"), now: new Date(), notices: [], noCache: () => {} });
     expect(d.points.length).toBe(30);
     expect(up.calls.filter((c) => c.name.startsWith("SWPC GOES X-ray flux")).length).toBe(2);
   });
 
   it("explains in plain words when the retry is truncated too", async () => {
     vi.stubGlobal("fetch", async () => new Response('[{"time_tag": "2026-10-13T12:11:00Z", "satellite": 18, "flux'));
-    await expect(goesSource.load({ env: {} as never, upstream: new Upstream(), params: new URLSearchParams("hours=6"), now: new Date(), notices: [] })).rejects.toThrow(/incomplete X-ray file/);
+    await expect(goesSource.load({ env: {} as never, upstream: new Upstream(), params: new URLSearchParams("hours=6"), now: new Date(), notices: [], noCache: () => {} })).rejects.toThrow(/incomplete X-ray file/);
   });
 });

@@ -1,6 +1,7 @@
 import type { CloseApproach, NeoData } from "../../shared/contract";
 import { SourceError } from "../lib/upstream";
-import { addDays, clampInt, isoDate, num } from "../lib/util";
+import { intParam, readParams } from "../lib/params";
+import { addDays, isoDate, num } from "../lib/util";
 import type { SourceModule } from "./types";
 
 const CAD = "https://ssd-api.jpl.nasa.gov/cad.api";
@@ -64,15 +65,19 @@ export function parseCad(json: CadResponse, phaDes: Set<string>): CloseApproach[
   return out.sort((a, b) => a.time.localeCompare(b.time));
 }
 
+/** Query parameters this source reads (also its cache key, see lib/params.ts). */
+const PARAMS = { past: intParam(0, 30, 7), ahead: intParam(7, 120, 60) };
+
 export const neoSource: SourceModule<"neo"> = {
   id: "neo",
   title: "Near-Earth asteroid close approaches",
   provider: "NASA/JPL SSD · CNEOS Close Approach Data API",
   docsUrl: "https://ssd-api.jpl.nasa.gov/doc/cad.html",
+  maxAge: 3600, // CNEOS updates orbits a few times a day
+  params: PARAMS,
 
   async load({ upstream, params, now, notices }) {
-    const past = clampInt(params.get("past"), 0, 30, 7);
-    const ahead = clampInt(params.get("ahead"), 7, 120, 60);
+    const { past, ahead } = readParams(PARAMS, params);
     // 0.05 au ≈ 19.5 lunar distances — the CNEOS threshold for "close" approaches.
     const distMaxAu = 0.05;
     const start = addDays(now, -past);

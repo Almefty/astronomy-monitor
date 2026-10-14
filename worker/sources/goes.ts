@@ -1,4 +1,5 @@
 import type { GoesData, GoesFlare } from "../../shared/contract";
+import { oneOf, readParams } from "../lib/params";
 import { SourceError, type Upstream } from "../lib/upstream";
 import type { SourceModule } from "./types";
 
@@ -97,13 +98,18 @@ async function fetchFlux(upstream: Upstream, url: string): Promise<unknown> {
   }
 }
 
+/** Query parameters this source reads (also its cache key, see lib/params.ts). */
+const PARAMS = { hours: oneOf("24", "6") };
+
 export const goesSource: SourceModule<"goes"> = {
   id: "goes",
   title: "GOES X-ray flux",
   provider: "NOAA SWPC",
   docsUrl: "https://www.swpc.noaa.gov/products/goes-x-ray-flux",
+  maxAge: 60, // SWPC rewrites the files every minute (and caches them for 60 s); live mode polls every minute
+  params: PARAMS,
   async load({ upstream, params }) {
-    const hours = params.get("hours") === "6" ? 6 : 24;
+    const hours = readParams(PARAMS, params).hours === "6" ? 6 : 24;
     const fluxUrl = `${SWPC_BASE}/${hours === 6 ? "xrays-6-hour" : "xrays-1-day"}.json`;
     const [flux, latest, list] = await Promise.all([
       fetchFlux(upstream, fluxUrl),

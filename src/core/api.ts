@@ -11,6 +11,11 @@ export class ApiError extends Error {
   }
 }
 
+/** The server's per-client limit (HTTP 429), also when a panel re-wraps the error (solar's DONKI feed). */
+export function isRateLimited(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 429 || err.body?.error.kind === "rate-limited");
+}
+
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   let res: Response;
   try {

@@ -1035,6 +1035,12 @@ a:hover {
   flex-wrap: wrap;
   margin-top: 10px;
 }
+.apod-rights {
+  margin: 12px 0 0;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .filmstrip {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));

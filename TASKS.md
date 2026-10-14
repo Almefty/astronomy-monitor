@@ -4,7 +4,45 @@
 there with live data (all six panels, light/dark, 1440/375/360 px, live mode). Adds cosmic explosions (GCN
 Circulars), space telescopes (Webb/Hubble schedules) and live mode with real-time GOES X-rays.
 61 unit tests pass. Version 1 notes below still apply.
+**2026-10-14:** hardening for a public site — Workers Cache on `/api`, per-client rate limit, safer links and
+embeds, APOD credits always shown (see "Hardening"). 72 unit tests pass.
 Next: version 3 (3D Solar System, see "Later versions").
+
+# Hardening (2026-10-14)
+
+The site stays public (portfolio), without Cloudflare Access, on the free plan.
+
+- [x] Workers Cache — confirmed in Cloudflare's docs (14 Oct 2026): available on every plan, works on
+      workers.dev, needs Wrangler ≥ 4.69 (`exports` per entrypoint ≥ 4.107; we have 4.149). Cache hits run no
+      Worker code and no upstream calls (no CPU) but still count as requests. **With caching on the default
+      entrypoint, static-asset requests would also be billed as requests**, so only the `Api` entrypoint is
+      cached; the uncached front Worker forwards `/api/*` to it via `ctx.exports.Api` (default since compat
+      date 2025-11-17).
+- [x] Lifetimes (`maxAge` per source): GOES 60 s (live 1 min) · GCN 5 min (live 10 min) · DONKI 10 min
+      (live 15 min) · APOD 30 min · close approaches 1 h · telescopes 1 h · exoplanets + catalog 6 h ·
+      GCN circular 6 h · status 5 min. `no-store`: errors, 404/405/429, dev sample, partial failures.
+- [x] Cache key = path + query (not host) + Worker version, so each deploy starts fresh. The front Worker
+      forwards only a canonical URL (declared params, clamped, fixed order; no client headers), so junk
+      query strings or an `Authorization` header can't bypass the cache.
+- [x] Rate Limiting binding `API_RATE_LIMIT`: 120 requests / 60 s per IPv4 address or IPv6 /64, fails open.
+      Cloudflare's docs don't state plan availability, and an open bug (workers-sdk#16097, Oct 2026) reports
+      the binding never blocking on free workers.dev accounts. Enforced locally (`npm run dev`): 429 + `Retry-After`.
+- [x] 429 in the UI: panels showing data keep it and the header says "Too many requests — data not updated";
+      empty panels show the message with "Try again".
+- [x] `src/viz/chart.ts` point links go through `safeUrl`; APOD iframe sandboxed (`allow-scripts
+      allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox`), host check exact
+      (`www.youtube-nocookie.com`, `player.vimeo.com`), forced https. YouTube verified playing in the sandbox;
+      Vimeo's player loads but the in-app test browser can't play Vimeo even unsandboxed (codec), not the sandbox.
+- [x] APOD: credit & copyright always shown ("see the entry on NASA’s site" when missing), repeated
+      "Image Credit:" labels stripped, rights note + "About APOD" link under the filmstrip.
+- [x] Git history scan (17 commits): no secrets, keys, tokens, `.dev.vars` or `dist/` ever committed.
+- [ ] Verify on the live site: second request served from cache (`cf-cache-status: HIT`, unchanged
+      `fetchedAt`, no new upstream calls), static assets unaffected, rate limit behaviour.
+
+## Lessons learned (hardening)
+- **Workers Cache applies heuristic lifetimes** when `Cache-Control` is missing (2 h for a 200), so every
+  `/api` response states its policy explicitly.
+- **Panels show `fetchedAt`** ("Updated 14:16"), so a cached response is honest about its age.
 
 # Version 2
 

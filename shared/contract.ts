@@ -32,7 +32,7 @@ export interface Envelope<T> {
   notices: Notice[];
 }
 
-export type ErrorKind = "timeout" | "unreachable" | "upstream" | "parse" | "bad-request" | "internal";
+export type ErrorKind = "timeout" | "unreachable" | "upstream" | "parse" | "bad-request" | "rate-limited" | "internal";
 
 export interface ApiErrorBody {
   source: string;

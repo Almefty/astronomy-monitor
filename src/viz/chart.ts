@@ -1,6 +1,12 @@
 import type { ScaleLinear, ScaleLogarithmic, ScaleTime } from "d3-scale";
-import { s } from "../core/dom";
+import { s, safeUrl } from "../core/dom";
 import { hideTip, showTip, showTipAt, type TipContent } from "./tooltip";
+
+/** Point links come from upstream data: open only http(s) URLs, in a new tab without an opener. */
+function openLink(href: string) {
+  const url = safeUrl(href);
+  if (url) window.open(url, "_blank", "noopener,noreferrer");
+}
 
 export interface Margin {
   top: number;
@@ -132,7 +138,7 @@ export function hoverLayer(svg: SVGSVGElement, points: HoverPoint[], area: { x: 
     const mouse = ev.pointerType === "mouse";
     // On touch, the first tap shows the tooltip; a second tap on the same point selects it.
     if (p?.onSelect && (mouse || tapped === p)) p.onSelect();
-    else if (p?.href && mouse) window.open(p.href, "_blank", "noopener");
+    else if (p?.href && mouse) openLink(p.href);
     tapped = p;
   });
 
@@ -151,7 +157,7 @@ export function hoverLayer(svg: SVGSVGElement, points: HoverPoint[], area: { x: 
     t.addEventListener("keydown", (ev) => {
       if (ev.key !== "Enter") return;
       if (p.onSelect) p.onSelect();
-      else if (p.href) window.open(p.href, "_blank", "noopener");
+      else if (p.href) openLink(p.href);
     });
     kb.append(t);
   }

@@ -84,7 +84,11 @@ All four sources were checked against their live APIs before building:
 
 ```
 worker/                 Cloudflare Worker = the only server code (holds the secret, calls upstream APIs)
-  index.ts              router: /api/status, /api/sources/:id, /api/exoplanets/catalog, /api/gcn/circulars/:id
+  index.ts              front door for /api/*: rate limit, canonical URL → cached `Api` entrypoint
+  api.ts                routes: /api/status, /api/sources/:id, /api/exoplanets/catalog, /api/gcn/circulars/:id;
+                        Cache-Control per response
+  lib/params.ts         declared query parameters per source (values clamped; also the cache key)
+  lib/ratelimit.ts      per-client limit (IPv4 address / IPv6 /64), fails open
   lib/upstream.ts       fetch with timeouts, typed errors, API-key redaction, call log shown in the UI
   lib/coords.ts         strict sky-coordinate parsing from circular text and from target names
   sources/*.ts          one module per data source → normalized JSON (see shared/contract.ts)
@@ -103,6 +107,7 @@ test/                   unit tests for the Worker normalizers (incl. a real DONK
 ```
 
 - **Free-plan friendly:** static files are served from Cloudflare's asset store (free); only `/api/*` runs the Worker. The 0.8 MB exoplanet catalog is streamed through without parsing, which keeps the Worker far under the free plan's 10 ms CPU limit. No database, no cron jobs, no paid services. Version 2 keeps to the same limits: the telescope panel asks for Webb and Hubble in two parallel requests (halves CPU per request; Hubble's ~200 KB timeline is only cut into columns inside the display window), the JWST schedules page is scanned with `indexOf` and abandoned after the first links, a GCN refresh stays under the 50-subrequest limit (≤ 5 list pages + ≤ 40 circulars), and live updates fetch the 6-hour X-ray file (~160 KB) and merge it into the day already shown. With one open tab, live mode costs at most ~1,500 Worker requests per day (free plan: 100,000).
+- **Caching and rate limit:** Cloudflare's Workers Cache sits in front of the API. Each response says how long it may be reused — GOES X-rays 60 s, GCN 5 min, DONKI 10 min, APOD 30 min, close approaches and telescope schedules 1 h, exoplanets 6 h — always shorter than the live-mode interval for live feeds. A repeated request within that time is answered by Cloudflare without running the Worker or calling NASA/NOAA/STScI. Errors, partial failures and sample data are never cached. The time shown on each panel is when the data was actually fetched. Per client, `/api/*` allows 120 requests a minute (a "Refresh all" is about 10); beyond that the panels keep their data and say "Too many requests".
 - **Content-Security-Policy unchanged:** every upstream call goes through the Worker (`connect-src 'self'`), the sky maps are drawn locally (no external scripts or map tiles), and "View sky in Aladin" is an ordinary link that opens CDS's Aladin Lite in a new tab. Embedding Aladin Lite would have needed its script host, WebAssembly (`'wasm-unsafe-eval'`) and its image-tile servers in the CSP, so it was not embedded.
 - **Secret handling:** `NASA_API_KEY` exists only as a Worker secret (Cloudflare) or in `.dev.vars` (local, gitignored). It is never sent to the browser, never logged, and redacted (`api_key=***`) from the request log shown in each panel's "Details".
 - **Why `npm run dev` runs `scripts/dev.mjs`:** Cloudflare's local runtime (workerd) doesn't yet trust the certificate chain used by `*.jpl.nasa.gov`, so the launcher hands it Node's bundled Mozilla root certificates. Nothing is installed system-wide; production on Cloudflare doesn't need this.
@@ -152,3 +157,5 @@ Live at **https://astronomy-monitor.almefty.workers.dev** (Cloudflare Workers, f
 - Exoplanet radii for non-transiting planets are often estimated by the archive from mass. That creates the horizontal "stripe" of giant planets near 13 R⊕.
 - The Exoplanet Archive is sometimes slow (up to ~25 s). If its count query times out, the total is counted from the catalog instead.
 - The DEMO_KEY allows only a handful of requests per hour, which matters only if the APOD fallback is used.
+- **Cached data can be up to one lifetime old** (e.g. 60 s for X-rays, 5 min for GCN); "Refresh" within that window returns the same data.
+- **APOD images belong to their credited authors** (many are copyrighted). The dashboard shows them as NASA publishes them, with the credit, and doesn't relicense them.

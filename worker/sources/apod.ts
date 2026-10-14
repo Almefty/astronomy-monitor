@@ -48,6 +48,17 @@ function youtubeId(src: string): string | null {
   return /youtube(?:-nocookie)?\.com\/embed\/([\w-]{6,})/.exec(src)?.[1] ?? null;
 }
 
+/**
+ * Plain-text credit line. Some entries repeat the label inside the field ("<strong>Image Credit:</strong> NASA, …");
+ * the panel adds its own label, so drop it here.
+ */
+export function creditText(raw: string | undefined): string {
+  return htmlToText(raw ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/^(?:(?:image|video|illustration)\s+)?credits?(?:\s*(?:&|and)\s*copyright)?\s*:\s*/i, "")
+    .trim();
+}
+
 interface RawBasic {
   date: string; title: string; permalink: string; media_type: string; explanation: string;
   credit?: string; copyright?: string; alt?: string; url?: string; hdurl?: string | null; basic_html?: string;
@@ -84,7 +95,7 @@ export function fromBasic(x: RawBasic): ApodEntry {
     videoUrl,
     videoKind,
     explanation: cleanExplanation(x.explanation ?? ""),
-    credit: htmlToText(x.credit || x.copyright || ""),
+    credit: creditText(x.credit || x.copyright),
     alt: htmlToText(x.alt ?? ""),
     permalink: x.permalink || x.url || "https://science.nasa.gov/apod/",
   };
@@ -113,7 +124,7 @@ function fromLegacy(x: RawLegacy): ApodEntry {
     videoUrl: isVideo ? x.url ?? null : null,
     videoKind: isVideo ? (/youtube|vimeo/.test(x.url ?? "") ? "embed" : "file") : null,
     explanation: cleanExplanation(x.explanation ?? ""),
-    credit: (x.copyright ?? "").replace(/\s+/g, " ").trim(),
+    credit: creditText(x.copyright),
     alt: "",
     permalink: `https://apod.nasa.gov/apod/ap${x.date.slice(2).replace(/-/g, "")}.html`,
   };
@@ -214,6 +225,7 @@ export const apodSource: SourceModule<"apod"> = {
   title: "Astronomy Picture of the Day",
   provider: "NASA APOD · science.nasa.gov (api.nasa.gov fallback)",
   docsUrl: "https://science.nasa.gov/apod/",
+  maxAge: 1800, // one new picture a day; at most 30 min late after it appears
 
   async load({ upstream, env, now, notices }) {
     // 1) JSON API  2) official RSS feed (same data)  3) legacy api.nasa.gov, accepted only if it

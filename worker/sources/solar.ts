@@ -1,6 +1,7 @@
 import type { Cme, CmeEarthImpact, Flare, GeoStorm, KpReading, SolarData } from "../../shared/contract";
 import { SourceError } from "../lib/upstream";
-import { addDays, clampInt, donkiTime, isoDate, num } from "../lib/util";
+import { intParam, oneOf, readParams } from "../lib/params";
+import { addDays, donkiTime, isoDate, num } from "../lib/util";
 import type { SourceModule } from "./types";
 
 /**
@@ -146,16 +147,23 @@ export function parseStorms(raw: RawStorm[]): GeoStorm[] {
   return out.sort((a, b) => a.start.localeCompare(b.start));
 }
 
+/** Query parameters this source reads (also its cache key, see lib/params.ts). */
+const PARAMS = { days: intParam(3, 59, 30), sample: oneOf("", "1") };
+
 export const solarSource: SourceModule<"solar"> = {
   id: "solar",
   title: "Solar activity",
   provider: "NASA DONKI (Space Weather Database Of Notifications, Knowledge, Information) · CCMC",
   docsUrl: "https://ccmc.gsfc.nasa.gov/tools/DONKI/",
+  maxAge: 600, // DONKI entries appear within minutes to hours; live mode polls every 15 min
+  params: PARAMS,
 
-  async load({ upstream, params, now, notices, env }) {
+  async load({ upstream, params, now, notices, env, noCache }) {
+    const query = readParams(PARAMS, params);
     // Dev-only: CCMC blocks some networks, so local previews can use a saved real snapshot.
     // The whole branch (and the fixture) is removed from production builds.
-    if (import.meta.env.DEV && params.get("sample") === "1") {
+    if (import.meta.env.DEV && query.sample === "1") {
+      noCache();
       const raw = (await import("../../test/fixtures/donki-2026-10-09.json")).default;
       notices.push({
         level: "warning",
@@ -168,7 +176,7 @@ export const solarSource: SourceModule<"solar"> = {
         feeds: { flares: true, cmes: true, storms: true },
       };
     }
-    const days = clampInt(params.get("days"), 3, 59, 30); // +1 day below keeps the range under DONKI's 60-day cap
+    const days = query.days; // +1 day below keeps the range under DONKI's 60-day cap
     const start = addDays(now, -days);
     // endDate is inclusive and day-granular; include tomorrow so nothing "today" (UTC) is cut off.
     const q = `startDate=${isoDate(start)}&endDate=${isoDate(addDays(now, 1))}`;

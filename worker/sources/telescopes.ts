@@ -2,6 +2,7 @@ import type { PositionSource, ScheduledObservation, TelescopeData, TelescopeId, 
 import { angularSeparation, sunPosition } from "../../shared/astro";
 import { positionFromName, resolverName } from "../lib/coords";
 import { SourceError, type Upstream } from "../lib/upstream";
+import { oneOf, readParams } from "../lib/params";
 import { addDays } from "../lib/util";
 import type { SourceModule } from "./types";
 
@@ -450,23 +451,30 @@ async function loadSchedule(
   return sched;
 }
 
+/** Query parameters this source reads (also its cache key, see lib/params.ts). */
+const PARAMS = { telescope: oneOf("", "JWST", "HST") };
+
 export const telescopeSource: SourceModule<"telescopes"> = {
   id: "telescopes",
   title: "Space telescopes",
   provider: "STScI (JWST & HST schedules), MAST, CDS Sesame",
   docsUrl: JWST_INDEX,
-  async load({ upstream, now, params }) {
+  maxAge: 3600, // weekly schedules; "now" and "next" are worked out in the browser
+  params: PARAMS,
+  async load({ upstream, now, params, noCache }) {
     const t = now.getTime();
     const windowStart = t - 6 * HOUR;
     const windowEnd = addDays(now, 7).getTime();
     // The browser asks for each telescope separately (in parallel): that keeps each request's
     // CPU time well inside the free plan's limit and isolates one schedule's failure.
-    const only = params.get("telescope");
-    const which: TelescopeId[] = only === "JWST" || only === "HST" ? [only] : ["JWST", "HST"];
+    const only = readParams(PARAMS, params).telescope;
+    const which: TelescopeId[] = only ? [only] : ["JWST", "HST"];
     const schedules = await Promise.all(which.map((tel) => loadSchedule(tel, upstream, t, windowStart, windowEnd)));
     if (schedules.every((s) => s.error?.kind === "unreachable")) {
       throw new SourceError("unreachable", `STScI could not be reached: ${schedules[0]!.error!.message}`);
     }
+    // "Not published yet" is a normal state; an unreadable or unreachable schedule is a failure.
+    if (schedules.some((s) => s.error && s.error.kind !== "stale")) noCache();
     return { windowStart: new Date(windowStart).toISOString(), windowEnd: new Date(windowEnd).toISOString(), schedules } satisfies TelescopeData;
   },
 };

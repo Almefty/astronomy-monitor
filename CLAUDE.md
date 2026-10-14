@@ -9,6 +9,12 @@ Read `README.md` (architecture, commands) and `TASKS.md` (state, known issues, l
   triggers or background jobs. Data is fetched only when the user presses a refresh button — the one
   approved exception is **Live mode** (v2): opt-in, off on every visit, only while the tab is visible,
   per-feed intervals within upstream limits (see `src/core/live.ts`).
+- **Workers Cache + rate limit (2026-10-14):** `/api/*` enters the front Worker (`worker/index.ts`: per-client
+  rate limit, canonical URL), which forwards to the cached `Api` entrypoint. Caching is enabled for `Api`
+  only, never for `default`, or every static-asset request would count toward the 100k/day quota. Every
+  `/api` response must send an explicit `Cache-Control`: `maxAge` per source (≤ its live-mode interval),
+  `no-store` for errors, sample data and partial failures (`noCache()` / failed upstream call / warning).
+  A new query parameter must be declared in the source's `params` spec, or it is dropped from the URL.
 - Keep the Worker within the free plan's **10 ms CPU per request**: stream large payloads through
   unparsed (see the exoplanet catalog), and stop parsing once you have what you need.
 - **`NASA_API_KEY` is a Worker secret.** Never put it in frontend code, Git, logs, commit messages or
@@ -31,6 +37,9 @@ Read `README.md` (architecture, commands) and `TASKS.md` (state, known issues, l
 - Check the **production build**, not just dev: the CSS minifier has changed output before
   (see TASKS.md lessons). Confirm on the deployed site after pushing.
 - One failing data source must never break other panels (each panel isolates its errors).
+- APOD credit & copyright must always be visible (per entry, plus the rights note under the filmstrip).
+- Links and embeds built from upstream data go through `safeUrl` (http/https only); the APOD player
+  iframe stays sandboxed.
 - Design: no cream/off-white backgrounds, no italic accent words in headings, no "01/02/03"
   section labels, no pill-shaped buttons. Chart colours follow the validated palette in
   `src/styles/tokens.css` (orange→red is reserved for severity).

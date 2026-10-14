@@ -5,6 +5,17 @@ export interface Env {
   NASA_API_KEY?: string;
   APP_ENV?: string;
   ASSETS: Fetcher;
+  /** Rate Limiting binding (wrangler.jsonc `ratelimits`); optional so a missing binding never breaks the API. */
+  API_RATE_LIMIT?: RateLimit;
+}
+
+declare global {
+  namespace Cloudflare {
+    /** Types `ctx.exports` (loopback bindings to this Worker's own entrypoints). */
+    interface GlobalProps {
+      mainModule: typeof import("../index");
+    }
+  }
 }
 
 /** NASA's public, heavily rate-limited key used until the real one is configured. */

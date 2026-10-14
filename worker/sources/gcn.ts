@@ -2,7 +2,8 @@ import type { GcnCircular, GcnData, GcnEvent, GcnEventType, GcnPosition } from "
 import { angularSeparation } from "../../shared/astro";
 import { extractPositions } from "../lib/coords";
 import { SourceError, type Upstream } from "../lib/upstream";
-import { addDays, clampInt, isoDate } from "../lib/util";
+import { intParam, readParams } from "../lib/params";
+import { addDays, isoDate } from "../lib/util";
 import type { SourceModule } from "./types";
 
 /**
@@ -386,13 +387,18 @@ export function buildEvents(drafts: EventDraft[], bodies: Map<number, GcnCircula
 
 const round = (x: number, d: number) => Math.round(x * 10 ** d) / 10 ** d;
 
+/** Query parameters this source reads (also its cache key, see lib/params.ts). */
+const PARAMS = { days: intParam(1, 30, 7) };
+
 export const gcnSource: SourceModule<"gcn"> = {
   id: "gcn",
   title: "Cosmic explosions",
   provider: "NASA GCN Circulars",
   docsUrl: "https://gcn.nasa.gov/circulars",
+  maxAge: 300, // ~130 circulars a week; live mode polls every 10 min
+  params: PARAMS,
   async load({ upstream, params, now, notices }) {
-    const days = clampInt(params.get("days"), 1, 30, 7);
+    const { days } = readParams(PARAMS, params);
     const start = addDays(now, -days);
     const { items, total } = await loadList(upstream, isoDate(start));
     const { events: drafts } = groupEvents(items);

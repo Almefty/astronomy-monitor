@@ -1,5 +1,5 @@
 import type { Notice, UpstreamCall } from "../../shared/contract";
-import { ApiError } from "./api";
+import { ApiError, isRateLimited } from "./api";
 import { clear, h, icon } from "./dom";
 import { age, localTime } from "./format";
 import { ICONS } from "./icons";
@@ -172,7 +172,11 @@ export class PanelHost<D = unknown> {
       return true;
     } catch (err) {
       if (controller.signal.aborted) return false;
-      if (opts.quiet && this.result && !this.body.querySelector(".panel-body > .error-state")) {
+      const showingData = !!this.result && !this.body.querySelector(".panel-body > .error-state");
+      if (showingData && isRateLimited(err)) {
+        // The server's per-client limit: keep the data on screen and say so in the header.
+        this.liveError = "Too many requests — data not updated; try again in a minute";
+      } else if (opts.quiet && showingData) {
         this.liveError = `Live update failed ${localTime(new Date().toISOString())} — retrying`;
         console.warn(`[${this.def.id}] live update failed`, err);
       } else {

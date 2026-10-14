@@ -170,7 +170,7 @@ describe("APOD source selection", () => {
   }
   const run = (now: Date) => {
     const notices: Notice[] = [];
-    return apodSource.load({ env: {} as never, upstream: new Upstream(), params: new URLSearchParams(), now, notices }).then((data) => ({ data, notices }));
+    return apodSource.load({ env: {} as never, upstream: new Upstream(), params: new URLSearchParams(), now, notices, noCache: () => {} }).then((data) => ({ data, notices }));
   };
   afterEach(() => vi.unstubAllGlobals());
 

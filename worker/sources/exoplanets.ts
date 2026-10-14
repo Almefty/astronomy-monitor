@@ -1,6 +1,7 @@
 import { CATALOG_COLUMNS, type ExoplanetData, type NewPlanet } from "../../shared/contract";
 import type { Upstream } from "../lib/upstream";
-import { addDays, clampInt, isoDate, num } from "../lib/util";
+import { intParam, readParams } from "../lib/params";
+import { addDays, isoDate, num } from "../lib/util";
 import type { SourceModule } from "./types";
 
 const TAP = "https://exoplanetarchive.ipac.caltech.edu/TAP/sync";
@@ -38,14 +39,22 @@ export function toNewPlanet(p: RawPlanet, added: string): NewPlanet {
   };
 }
 
+/** Query parameters this source reads (also its cache key, see lib/params.ts). */
+/** The archive is updated about weekly; the catalog and the summary share one lifetime. */
+export const CATALOG_MAX_AGE = 6 * 3600;
+
+const PARAMS = { days: intParam(14, 365, 90) };
+
 export const exoplanetSource: SourceModule<"exoplanets"> = {
   id: "exoplanets",
   title: "Exoplanet discoveries",
   provider: "NASA Exoplanet Archive (Caltech/IPAC) · TAP service",
   docsUrl: "https://exoplanetarchive.ipac.caltech.edu/docs/TAP/usingTAP.html",
+  maxAge: CATALOG_MAX_AGE,
+  params: PARAMS,
 
   async load({ upstream, params, now, notices }) {
-    const windowDays = clampInt(params.get("days"), 14, 365, 90);
+    const { days: windowDays } = readParams(PARAMS, params);
     const since = isoDate(addDays(now, -windowDays));
 
     // A planet's first appearance in the archive = the earliest release of any of its parameter sets.
@@ -91,6 +100,6 @@ export async function streamCatalog(upstream: Upstream): Promise<Response> {
   const q = `select ${CATALOG_COLUMNS.join(",")} from pscomppars`;
   const res = await upstream.fetch("Exoplanet Archive: full catalog", tapUrl(q, "csv"), { timeoutMs: 50_000 });
   return new Response(res.body, {
-    headers: { "content-type": "text/csv; charset=utf-8", "cache-control": "no-store" },
+    headers: { "content-type": "text/csv; charset=utf-8", "cache-control": `public, max-age=${CATALOG_MAX_AGE}` },
   });
 }
