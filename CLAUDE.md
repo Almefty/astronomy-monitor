@@ -5,7 +5,9 @@
 
 Astronomy dashboard: one Cloudflare Worker (`worker/`) serves `/api/*` and a static
 TypeScript + D3 frontend (`src/`). Live at https://astronomy-monitor.almefty.workers.dev.
-Read `README.md` (architecture, commands) and `TASKS.md` (state, known issues, lessons) first.
+Code: public repository https://github.com/Almefty/astronomy-monitor (MIT; the old private history is
+archived as `Almefty/astronomy-monitor-archive` — don't push there). Read `README.md` (architecture,
+commands) and `TASKS.md` (state, known issues, lessons) first.
 
 ## Hard constraints
 - **Cloudflare free plan only.** No paid services, no databases (D1/KV/R2/Durable Objects), no cron

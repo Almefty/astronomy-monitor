@@ -15,6 +15,9 @@ the circular reader runs oldest → newest (1 = first report) with first/newest,
 jump list. The GCN archive list has no dates, so the jump list shows dates only for circulars already read.
 **2026-10-15 (v3):** 3D Solar System panel (see "Version 3"). 83 unit tests pass.
 **2026-10-15 (v3.1):** 3D view readability + navigation pass (see "Version 3.1").
+**2026-10-15 (public):** the repository is public at https://github.com/Almefty/astronomy-monitor (MIT; history
+rewritten to remove personal details, commit times shown in UTC, so commit hashes differ from the private
+archive `Almefty/astronomy-monitor-archive`). Workers Builds deploys from the public repository.
 **2026-10-15 (fix):** "Refresh all" undercounted since the Workers Cache: it counted a panel as updated only if
 its `fetchedAt` was newer than the click, so cached answers looked like failures ("0 of 7 panels updated").
 It now counts requests that succeeded (a request overtaken by a newer refresh of the same panel takes that
@@ -40,7 +43,7 @@ one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming
       (short version on phones). Taps only select with the primary button, no shift, one finger.
 - [x] Verified: dev + production preview, light/dark, 1280 / 375 / 360 px (no horizontal scroll), Inner /
       Outer / Near Earth, no overlapping or dropped labels (checked with bounding rects), no console errors.
-- [x] Deployed (981d1f3, Workers Builds success) and verified live: Layers control, new hint and legend,
+- [x] Deployed (4f5ced2, Workers Builds success) and verified live: Layers control, new hint and legend,
       Outer view with all nine labels, no console errors.
 - Note: there is no "follow an asteroid" mode; Re-centre returns to the Sun (Inner/Outer) or Earth (Near Earth).
 
@@ -96,7 +99,7 @@ Status: `[x]` done · `[~]` in progress · `[ ]` to do
 - [x] Verified locally: dev + production preview (CSP unchanged, 3D chunk fetched only when scrolled into
       view), 1280/1440 px, 375/360 px (no horizontal scroll), light + dark, playback, jump, hidden-tab pause,
       reduced motion, WebGL fallback, all seven panels load
-- [x] Deployed (c5a7dfc, Workers Builds success) and verified live: `/api/sources/orbits` loads 84/84
+- [x] Deployed (fb503a3, Workers Builds success) and verified live: `/api/sources/orbits` loads 84/84
       orbits from Cloudflare (CAD + 3 SBDB calls, ≤ 1 s each), `public, max-age=3600`, repeats are
       `cf-cache-status: HIT` with the same `fetchedAt` (junk parameters hit the same entry); "Refresh all"
       updates all seven panels; the 3D chunk loads only when the panel scrolls into view; 1280 px light and
@@ -142,7 +145,7 @@ The site stays public (portfolio), without Cloudflare Access, on the free plan.
 - [x] APOD: credit & copyright always shown ("see the entry on NASA’s site" when missing), repeated
       "Image Credit:" labels stripped, rights note + "About APOD" link under the filmstrip.
 - [x] Git history scan (17 commits): no secrets, keys, tokens, `.dev.vars` or `dist/` ever committed.
-- [x] Deployed (a93787e, Workers Builds success) and verified live: repeated requests return
+- [x] Deployed (e73326e, Workers Builds success) and verified live: repeated requests return
       `cf-cache-status: HIT` with a rising `Age` and the **same `fetchedAt`** as the first response (so no
       Worker run and no upstream calls); `?days=007&junk=…` hits the `days=7` entry; 404 is `no-store`; all six
       panels load, no console errors; a cached panel shows its true age ("Updated 14:21 · 3 min ago").
@@ -264,7 +267,8 @@ Status: `[x]` done · `[~]` in progress · `[ ]` to do
 - [x] README with local run, key setup, architecture and v2 extension points
 
 ## Deployment
-- [x] Private GitHub repository `Almefty/astronomy-monitor` created and pushed
+- [x] Private GitHub repository `Almefty/astronomy-monitor` created and pushed (since 2026-10-15 the public
+      repository of that name; the original private history is archived as `Almefty/astronomy-monitor-archive`)
 - [x] Connected to Cloudflare Workers Builds (auto-deploy on push to `main`)
 - [x] `NASA_API_KEY` added as a Worker secret (DEMO_KEY notice gone on the live site)
 - [x] Live at https://astronomy-monitor.almefty.workers.dev; all four panels verified with live data, including DONKI
