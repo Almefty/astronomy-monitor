@@ -1,5 +1,8 @@
 # Task list
 
+The project's working log: state per version, verification notes, known issues and lessons learned.
+Newest first. Commit hashes refer to this repository's history.
+
 **Current state (2026-10-13):** Version 2 is live at https://astronomy-monitor.almefty.workers.dev and verified
 there with live data (all six panels, light/dark, 1440/375/360 px, live mode). Adds cosmic explosions (GCN
 Circulars), space telescopes (Webb/Hubble schedules) and live mode with real-time GOES X-rays.
@@ -97,7 +100,7 @@ Status: `[x]` done · `[~]` in progress · `[ ]` to do
       Earth view; no console errors
 
 ## Lessons learned (v3)
-- **The in-app browser only produces animation frames while a screenshot is taken** (rAF, smooth scroll
+- **The Claude desktop app's in-app browser only produces animation frames while a screenshot is taken** (rAF, smooth scroll
   and IntersectionObserver wait). Take screenshots between steps when testing anything animated.
 - **`vite preview` needs the CA workaround too**: `.claude/launch.json` now starts it via `scripts/dev.mjs
   preview`, otherwise every JPL call fails locally. Restart the preview after `npm run build`.
@@ -266,9 +269,6 @@ Status: `[x]` done · `[~]` in progress · `[ ]` to do
 - [x] Fix: APOD action buttons on phones; heliosphere orbit labels spaced and haloed
 - [x] Renamed: no brand name; package/Worker/folder are `astronomy-monitor`; workers.dev subdomain `almefty`
 
-## Optional for you
-- [ ] Paste your NASA key into `.dev.vars` for local development (see README)
-
 ## Known issues
 - **DONKI doesn't load locally** on the development network: CCMC (`ccmc.gsfc.nasa.gov` and the legacy
   `kauai.ccmc.gsfc.nasa.gov`, both 169.154.198.x) refuses TCP connections from it. Works from Cloudflare.
@@ -280,7 +280,7 @@ Status: `[x]` done · `[~]` in progress · `[ ]` to do
 - **api.nasa.gov/planetary/apod** returns placeholder records ("NASA Science" + NASA logo, dates off by one)
   and is reported to go offline 2026-12-01. Kept only as a last fallback; placeholders are rejected.
 - **Exoplanet Archive TAP** response time varies 1–25 s; timeouts are generous and the count query is optional.
-- The Cloudflare dashboard Worker logs / `wrangler tail` haven't been used (needs the user's login); each API
+- The Cloudflare dashboard Worker logs / `wrangler tail` haven't been used (needs a Cloudflare login); each API
   response carries an `upstream` list (name, status, ms, redacted URL) shown under each panel's "Details".
 
 ## Lessons learned (read before changing things)

@@ -34,7 +34,7 @@ export interface FetchOptions {
   form?: Record<string, string>;
 }
 
-const USER_AGENT = "astronomy-monitor/1.0 (personal dashboard; Cloudflare Worker)";
+const USER_AGENT = "astronomy-monitor/1.0 (+https://github.com/Almefty/astronomy-monitor; Cloudflare Worker)";
 
 /**
  * Records every upstream call for transparency in the UI, enforces a timeout,

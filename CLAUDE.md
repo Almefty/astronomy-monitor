@@ -1,12 +1,15 @@
 # Astronomy Monitor — rules for working on this project
 
-Personal astronomy dashboard: one Cloudflare Worker (`worker/`) serves `/api/*` and a static
+> Instructions for AI coding agents (this file is read by [Claude Code](https://claude.com/claude-code)).
+> Human contributors: the same rules apply; start with `README.md`.
+
+Astronomy dashboard: one Cloudflare Worker (`worker/`) serves `/api/*` and a static
 TypeScript + D3 frontend (`src/`). Live at https://astronomy-monitor.almefty.workers.dev.
 Read `README.md` (architecture, commands) and `TASKS.md` (state, known issues, lessons) first.
 
 ## Hard constraints
 - **Cloudflare free plan only.** No paid services, no databases (D1/KV/R2/Durable Objects), no cron
-  triggers or background jobs. Data is fetched only when the user presses a refresh button — the one
+  triggers or background jobs. Data is fetched only when the visitor presses a refresh button — the one
   approved exception is **Live mode** (v2): opt-in, off on every visit, only while the tab is visible,
   per-feed intervals within upstream limits (see `src/core/live.ts`).
 - **Workers Cache + rate limit (2026-10-14):** `/api/*` enters the front Worker (`worker/index.ts`: per-client
@@ -18,17 +21,17 @@ Read `README.md` (architecture, commands) and `TASKS.md` (state, known issues, l
 - Keep the Worker within the free plan's **10 ms CPU per request**: stream large payloads through
   unparsed (see the exoplanet catalog), and stop parsing once you have what you need.
 - **`NASA_API_KEY` is a Worker secret.** Never put it in frontend code, Git, logs, commit messages or
-  chat, and never ask the user to paste it. Locally it lives in `.dev.vars` (gitignored); without it
+  chat, and never ask the maintainer to paste it. Locally it lives in `.dev.vars` (gitignored); without it
   the app falls back to `DEMO_KEY` and shows a notice. Upstream URLs are redacted (`api_key=***`).
 - **Pushing to `main` deploys to production automatically** (Cloudflare Workers Builds). Only push
-  when the user asks, and confirm the change on the live site afterwards. GitHub shows the build
+  when the maintainer asks, and confirm the change on the live site afterwards. GitHub shows the build
   result as a check run ("Workers Builds: astronomy-monitor") on each commit.
 - No GitHub/Cloudflare settings changes without asking.
 
-## Working with the user
-- The user rarely uses the CLI: give **exact step-by-step instructions**, preferring the Cloudflare
+## Working with the maintainer
+- The maintainer rarely uses the CLI: give **exact step-by-step instructions**, preferring the Cloudflare
   and GitHub web dashboards; when a command is unavoidable, give one command per code block.
-- System-wide installs (Node, Homebrew packages, gh): tell the user what to run; don't install them.
+- System-wide installs (Node, Homebrew packages, gh): tell the maintainer what to run; don't install them.
 - Verify every source against its live API before relying on it — NASA endpoints have moved before.
 - UI language is English. No brand name/logo: the header label is plain "Astronomy Monitor".
 
@@ -57,7 +60,7 @@ Read `README.md` (architecture, commands) and `TASKS.md` (state, known issues, l
   touching the math.
 - **Rendering is on demand** (no frame unless time, camera, selection or theme changes) and stops
   when the view is off-screen or the tab is hidden. Respect `prefers-reduced-motion` (no damping or
-  camera flights). Test frames in the in-app browser only advance while a screenshot is taken.
+  camera flights). Test frames in the Claude desktop app's in-app browser only advance while a screenshot is taken.
 - JPL's SBDB Query API: spaces aren't allowed in `EQ` (use anchored `RE`), the filter must stay
   under ~1,000 characters (502 otherwise), and `sb-group=neo` makes it ~15× faster.
 
