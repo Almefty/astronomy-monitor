@@ -16,9 +16,9 @@
     },
     {
       "name": "production-preview",
-      "runtimeExecutable": "npx",
+      "runtimeExecutable": "node",
       "runtimeArgs": [
-        "vite",
+        "scripts/dev.mjs",
         "preview",
         "--port",
         "4173",

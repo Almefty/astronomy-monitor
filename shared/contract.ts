@@ -6,7 +6,7 @@
  * touch one Worker module, never the visualizations.
  */
 
-export type SourceId = "neo" | "solar" | "exoplanets" | "apod" | "gcn" | "telescopes" | "goes";
+export type SourceId = "neo" | "solar" | "exoplanets" | "apod" | "gcn" | "telescopes" | "goes" | "orbits";
 
 export type KeyMode = "secret" | "demo";
 
@@ -93,6 +93,42 @@ export interface NeoData {
   windowEnd: string;
   distMaxAu: number;
   approaches: CloseApproach[];
+}
+
+/* ------------------------------------------------------------------ */
+/* 3D Solar System (v3): asteroid orbits from JPL SBDB                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Osculating heliocentric elements (ecliptic J2000, degrees) from JPL's Small-Body Database.
+ * The browser propagates them as a two-body orbit (shared/orbit.ts); planets need no request.
+ */
+export interface SmallBodyOrbit {
+  e: number;
+  /** Perihelion distance, au. */
+  q: number;
+  i: number;
+  om: number;
+  w: number;
+  /** Time of perihelion, JD TDB. */
+  tp: number;
+  /** Epoch of the osculating elements, JD TDB (two-body accuracy degrades away from it). */
+  epoch: number;
+  orbitId: string;
+  /** JPL orbit condition code: 0 (well determined) … 9 (very uncertain). */
+  conditionCode: number | null;
+  /** Days between first and last observation used in the fit. */
+  dataArcDays: number | null;
+}
+
+export interface OrbitsData {
+  windowStart: string;
+  windowEnd: string;
+  distMaxAu: number;
+  /** The same close approaches as the asteroid panel (PHA flags from SBDB). */
+  approaches: CloseApproach[];
+  /** Orbits keyed by primary designation; objects without one are missing. */
+  orbits: Record<string, SmallBodyOrbit>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -400,4 +436,5 @@ export type SourceDataMap = {
   gcn: GcnData;
   telescopes: TelescopeData;
   goes: GoesData;
+  orbits: OrbitsData;
 };

@@ -10,7 +10,57 @@ embeds, APOD credits always shown (see "Hardening"). 72 unit tests pass.
 `.is-busy` shows the progress cursor); GOES shows the latest reading's age with a tooltip on NOAA's delay;
 the circular reader runs oldest → newest (1 = first report) with first/newest, a position button and a
 jump list. The GCN archive list has no dates, so the jump list shows dates only for circulars already read.
-Next: version 3 (3D Solar System, see "Later versions").
+**2026-10-15 (v3):** 3D Solar System panel (see "Version 3"). 83 unit tests pass.
+
+# Version 3 — 3D Solar System (2026-10-15)
+
+Status: `[x]` done · `[~]` in progress · `[ ]` to do
+
+## Source verification (live, 2026-10-15)
+- [x] JPL "Approximate Positions of the Planets" Table 1 + error table — live page matches the constants
+      in `shared/orbit.ts` (no API; built into the code).
+- [x] JPL SBDB Query API: full-precision elements (`full-prec=true`), `pha` flag, epoch, condition code,
+      data arc. **`EQ` rejects spaces** ("bad character(s)") despite the docs → anchored `RE`.
+      **502 once `sb-cdata` passes ~1,000 chars** (~46 designations; docs say 2,048) → ≤ 700 chars per
+      request, parallel. **`sb-group=neo`: ~1 s instead of 13–17 s** per query. No CORS (Worker only).
+- [x] JPL Horizons API (vectors, ecliptic J2000, DE441) — used only to build the test fixture.
+- [x] CNEOS CAD — same query as the asteroid panel; PHA flags from SBDB match CAD's `pha=true` list
+      (524522, 2001 KF54, 2016 NV on 15 Oct).
+
+## Build
+- [x] `shared/orbit.ts`: Kepler (elliptic/hyperbolic/parabolic), JPL Table 1 planets, Earth = EMB − Moon
+      share, Meeus Moon (main terms, precessed to J2000), closest-approach search; UTC↔TDB (69.184 s)
+- [x] Accuracy vs Horizons (3 epochs): inner planets ≤ 27,000 km, Saturn ≤ 3.1 million km (all within
+      JPL's stated errors), Moon ≤ 58 km; asteroid miss distances vs CNEOS: median 0 %, p90 2 % (83 objects)
+- [x] Worker source `orbits` (`/api/sources/orbits?past&ahead`, 1 h cache, same params as `neo`; degraded
+      → `no-store`): CAD + 3–4 parallel SBDB queries (≤ 5 subrequests)
+- [x] Panel `solarsystem` (span-12, after APOD): time bar (Now, ◀ ❚❚ ▶, 1 h/s…1 yr/s, slider over the
+      CAD window with "now" and selected-CA marks, jump to date 1900–2049), views (Inner / Outer / Near
+      Earth following Earth), list + details (official vs model approach, agreement tag, orbit quality,
+      epoch warning), planet/Moon/Sun cards, hover tooltips, "Right now" summary (nearest asteroid now)
+- [x] `src/viz/orrery3d.ts` (lazy chunk, three 0.186.1): on-demand rendering, single draw call for all
+      asteroid orbits, dots ↔ true-size spheres, Moon orbit + 0.05 au ring + relative path (day ticks) near
+      Earth, DOM labels with overlap/edge handling, tap/click picking (26 px on touch), scale bar, theme,
+      context-loss recovery, colours converted to sRGB in the custom point shader
+- [x] Off-screen / hidden tab: no frames, playback paused (resumes without a jump); reduced motion: no
+      damping, instant camera moves; no WebGL 2 → clear message, controls/list/details still work
+- [x] Linked with the asteroid panel (`astro:show-in-3d` / `astro:show-in-neo` window events): 3D buttons in
+      "Closest upcoming"; "Show in close-approach chart" highlights the dot and opens its tooltip
+- [x] Tests: `test/orbit.test.ts` (11 tests, Horizons + CAD + SBDB fixture)
+- [x] Verified locally: dev + production preview (CSP unchanged, 3D chunk fetched only when scrolled into
+      view), 1280/1440 px, 375/360 px (no horizontal scroll), light + dark, playback, jump, hidden-tab pause,
+      reduced motion, WebGL fallback, all seven panels load
+
+## Lessons learned (v3)
+- **The in-app browser only produces animation frames while a screenshot is taken** (rAF, smooth scroll
+  and IntersectionObserver wait). Take screenshots between steps when testing anything animated.
+- **`vite preview` needs the CA workaround too**: `.claude/launch.json` now starts it via `scripts/dev.mjs
+  preview`, otherwise every JPL call fails locally. Restart the preview after `npm run build`.
+- **three.js ShaderMaterial writes linear colour**; without `#include <colorspace_fragment>` CSS colours
+  come out too dark.
+- **`scrollIntoView` on a list item also scrolls the page**; scroll the list container instead.
+- **Two-body orbits are good enough for most close approaches but not all.** Show the official value
+  next to the estimate rather than hiding the difference.
 
 # Hardening (2026-10-14)
 
@@ -216,5 +266,4 @@ Status: `[x]` done · `[~]` in progress · `[ ]` to do
 - [x] Cosmic explosions (NASA GCN Circulars) on an all-sky map — v2
 - [x] Webb & Hubble targets on a sky map — v2
 - [x] Live auto-refresh mode with real-time GOES X-ray data — v2
-- [ ] v3: 3D Solar System with planets and approaching asteroids moving in real time from JPL orbits
-      (hooks: panel registry + lazy `import("three")`, `shared/astro.ts`, `LiveMode.isActive()`/`livechange`; see README)
+- [x] v3: 3D Solar System with planets, the Moon and the close-approach asteroids from JPL orbits

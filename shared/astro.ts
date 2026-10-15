@@ -3,8 +3,8 @@
  *
  * Used in v2 for the Sun's position on the sky maps and for sanity-checking telescope
  * target positions (a telescope cannot point closer to the Sun than its avoidance angle).
- * v3 (3D Solar System) builds its orbit propagation on top of these time and frame
- * conversions, so keep them pure and unit-tested.
+ * The 3D Solar System's orbit propagation (shared/orbit.ts) builds on these, so keep them
+ * pure and unit-tested.
  */
 
 export const DEG = Math.PI / 180;

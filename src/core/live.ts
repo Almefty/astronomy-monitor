@@ -13,8 +13,8 @@ import type { PanelHost } from "./panel";
  * each, SWPC caches for 60 s); DONKI every 15 min; GCN every 10 min. Far inside the free
  * plan's 100,000 requests/day and the upstreams' published guidance.
  *
- * v3 hook: `isActive()` and the "livechange" event let an animated view (3D Solar System)
- * pause its render loop exactly when live updates pause.
+ * The 3D Solar System has its own clock and isn't part of live mode; it pauses itself when the
+ * tab is hidden or the view is off-screen (src/panels/solarsystem.ts).
  */
 export class LiveMode {
   enabled = false;

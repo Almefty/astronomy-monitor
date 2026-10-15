@@ -171,7 +171,7 @@ document.body.append(
     h(
       "section",
       { class: "intro", "aria-label": "Overview" },
-      h("div", null, h("h1", null, "What’s happening up there"), h("p", null, "Asteroid flybys, the Sun’s mood, cosmic explosions, what Webb and Hubble are looking at, newly found worlds and today’s sky picture — fetched live when you ask.")),
+      h("div", null, h("h1", null, "What’s happening up there"), h("p", null, "Asteroid flybys (also in a 3D Solar System), the Sun’s mood, cosmic explosions, what Webb and Hubble are looking at, newly found worlds and today’s sky picture — fetched live when you ask.")),
       lastAll,
     ),
     liveStatus,
@@ -180,7 +180,7 @@ document.body.append(
     h(
       "footer",
       { class: "site-foot" },
-      h("span", null, "Data: NASA/JPL SSD-CNEOS · NASA DONKI (CCMC) · NOAA SWPC · NASA GCN · STScI & MAST · CDS · NASA Exoplanet Archive (Caltech/IPAC) · NASA APOD. All times UTC unless noted."),
+      h("span", null, "Data: NASA/JPL SSD-CNEOS (close approaches, SBDB orbits, planetary elements) · NASA DONKI (CCMC) · NOAA SWPC · NASA GCN · STScI & MAST · CDS · NASA Exoplanet Archive (Caltech/IPAC) · NASA APOD. All times UTC unless noted."),
       h("span", null, "Data is fetched when you press a refresh button — or, only while Live mode is on and this tab is visible, automatically."),
     ),
   ),

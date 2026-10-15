@@ -4,11 +4,12 @@ import { exoplanetSource } from "./exoplanets";
 import { gcnSource } from "./gcn";
 import { goesSource } from "./goes";
 import { neoSource } from "./neo";
+import { orbitsSource } from "./orbits";
 import { solarSource } from "./solar";
 import { telescopeSource } from "./telescopes";
 import type { SourceModule } from "./types";
 
-/** Register new data sources here (v3: JPL orbital elements for the 3D Solar System …). */
+/** Register new data sources here. */
 export const SOURCES: { [K in SourceId]: SourceModule<K> } = {
   neo: neoSource,
   solar: solarSource,
@@ -17,6 +18,7 @@ export const SOURCES: { [K in SourceId]: SourceModule<K> } = {
   gcn: gcnSource,
   telescopes: telescopeSource,
   goes: goesSource,
+  orbits: orbitsSource,
 };
 
 export function getSource(id: string): SourceModule | undefined {

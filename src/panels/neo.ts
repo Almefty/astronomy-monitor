@@ -1,11 +1,12 @@
 import { scaleLog, scaleSqrt, scaleUtc } from "d3-scale";
 import type { CloseApproach, NeoData } from "../../shared/contract";
 import { fetchSource } from "../core/api";
-import { h, onResize, s, safeUrl } from "../core/dom";
+import { h, icon, onResize, s, safeUrl } from "../core/dom";
 import { fmt, metres, relative, sizeAnalogy, utc } from "../core/format";
 import { ICONS } from "../core/icons";
 import type { PanelDefinition, PanelResult } from "../core/panel";
 import { hoverLayer, placeLabels, svgRoot, timeAxis, yAxis, type HoverPoint } from "../viz/chart";
+import { hideTip, showTipAt } from "../viz/tooltip";
 
 const GEO_LD = 42_164 / 384_400; // geostationary orbit radius in lunar distances
 
@@ -86,6 +87,7 @@ function drawChart(el: HTMLElement, data: NeoData, width: number) {
     const past = t < now;
     const color = a.pha ? "var(--series-2)" : "var(--series-1)";
     const c = s("circle", {
+      "data-des": a.des,
       cx, cy, r: r((sizeKm(a) ?? 0.01) * 1000),
       fill: color, "fill-opacity": past ? 0.3 : 0.9,
       stroke: "var(--panel)", "stroke-width": 2,
@@ -112,7 +114,14 @@ function drawChart(el: HTMLElement, data: NeoData, width: number) {
   el.replaceChildren(svg);
 }
 
-function closestList(data: NeoData, now: number): HTMLElement {
+/** Ask the 3D Solar System panel to show an object; it sets `found` if it could. */
+function showIn3d(des: string, status: HTMLElement) {
+  const detail = { des, found: false };
+  window.dispatchEvent(new CustomEvent("astro:show-in-3d", { detail }));
+  status.textContent = detail.found ? "" : "The 3D Solar System has no orbit for this object yet — refresh that panel first.";
+}
+
+function closestList(data: NeoData, now: number, status: HTMLElement): HTMLElement {
   const upcoming = data.approaches.filter((a) => new Date(a.time).getTime() >= now).sort((a, b) => a.distLd - b.distLd).slice(0, 6);
   if (!upcoming.length) return h("p", { class: "footnote" }, "No upcoming approaches within 0.05 au in this window.");
   return h(
@@ -120,11 +129,14 @@ function closestList(data: NeoData, now: number): HTMLElement {
     { class: "rank-list" },
     upcoming.map((a) => {
       const km = sizeKm(a);
+      const name = a.name.replace(/^\((.*)\)$/, "$1");
+      const in3d = h("button", { type: "button", class: "btn btn-icon btn-quiet btn-3d", title: `Show ${name} in the 3D Solar System`, "aria-label": `Show ${name} in the 3D Solar System` }, icon(ICONS.orbit));
+      in3d.addEventListener("click", () => showIn3d(a.des, status));
       return h(
         "li",
         null,
-        h("span", { class: "name" }, h("a", { href: safeUrl(a.sbdbUrl) ?? "#", target: "_blank", rel: "noopener" }, a.name.replace(/^\((.*)\)$/, "$1")),
-          a.pha ? h("span", { class: "status-tag", style: "--tag:var(--series-2);margin-left:8px" }, "PHA") : null),
+        h("span", { class: "name" }, h("a", { href: safeUrl(a.sbdbUrl) ?? "#", target: "_blank", rel: "noopener" }, name),
+          a.pha ? h("span", { class: "status-tag", style: "--tag:var(--series-2);margin-left:8px" }, "PHA") : null, in3d),
         h("span", { class: "sub" }, `${relative(a.time, now)} · ${utc(a.time)}${km ? ` · ${sizeAnalogy(km * 1000)}` : ""}`),
         h("span", { class: "value" }, `${fmt.fixed(a.distLd, 2)} LD`, h("small", null, `${fmt.compact(a.distKm)} km`)),
       );
@@ -203,6 +215,7 @@ export const neoPanel: PanelDefinition<NeoData> = {
     );
 
     const chart = h("div", { class: "chart" });
+    const linkStatus = h("p", { class: "footnote", role: "status" });
     root.append(
       h(
         "div",
@@ -220,7 +233,7 @@ export const neoPanel: PanelDefinition<NeoData> = {
             h("li", null, h("span", { class: "swatch", style: "--c:var(--series-1);opacity:.35" }), "Already passed"),
           ),
         ),
-        h("div", null, h("h3", { class: "section-title" }, "Closest upcoming"), closestList(data, now)),
+        h("div", null, h("h3", { class: "section-title" }, "Closest upcoming"), closestList(data, now, linkStatus), linkStatus),
       ),
       table(data),
       h("p", { class: "footnote" }, "Sizes are estimated from brightness (absolute magnitude H) for albedos 0.05–0.25 unless measured. 1 LD = 384,400 km. Times are TDB (within ~70 s of UTC)."),
@@ -230,7 +243,39 @@ export const neoPanel: PanelDefinition<NeoData> = {
       chart.append(h("p", { class: "footnote" }, "No close approaches in this window."));
       return;
     }
-    return onResize(chart, (w) => drawChart(chart, data, w));
+    // The 3D Solar System's "Show in close-approach chart": scroll here and point at the dot.
+    let linkTimer = 0;
+    const onShowInNeo = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ des: string; found: boolean }>).detail;
+      const a = data.approaches.find((x) => x.des === detail.des);
+      const mark = chart.querySelector<SVGElement>(`circle[data-des="${CSS.escape(detail.des)}"]`);
+      if (!a || !mark) return;
+      detail.found = true;
+      chart.querySelectorAll(".is-linked").forEach((el) => el.classList.remove("is-linked"));
+      mark.classList.add("is-linked", "is-hot");
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      chart.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
+      // Show the tooltip once scrolling has finished (any scroll hides tooltips).
+      window.clearTimeout(linkTimer);
+      const show = () => {
+        window.clearTimeout(linkTimer);
+        window.removeEventListener("scrollend", show);
+        if (mark.isConnected) showTipAt(tip(a, Date.now()), mark);
+      };
+      window.addEventListener("scrollend", show, { once: true });
+      linkTimer = window.setTimeout(show, reduce ? 50 : 1200);
+      window.setTimeout(() => {
+        mark.classList.remove("is-linked", "is-hot");
+        hideTip();
+      }, 5000);
+    };
+    window.addEventListener("astro:show-in-neo", onShowInNeo);
+    const stop = onResize(chart, (w) => drawChart(chart, data, w));
+    return () => {
+      stop();
+      window.clearTimeout(linkTimer);
+      window.removeEventListener("astro:show-in-neo", onShowInNeo);
+    };
   },
 
   summarize({ data }) {

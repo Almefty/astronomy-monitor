@@ -4,10 +4,11 @@ import { exoplanetPanel } from "./exoplanets";
 import { gcnPanel } from "./gcn";
 import { neoPanel } from "./neo";
 import { solarPanel } from "./solar";
+import { solarSystemPanel } from "./solarsystem";
 import { telescopePanel } from "./telescopes";
 
 /**
- * Panel order = page order. v3 (3D Solar System, lazy-loaded) slots in here; its live
- * animation can follow live mode's visible/hidden state (see core/live.ts).
+ * Panel order = page order. The 3D Solar System follows the close-approach panel it links to
+ * (its three.js code is a separate chunk, loaded only when the panel is on screen).
  */
-export const PANELS: PanelDefinition<any>[] = [neoPanel, apodPanel, solarPanel, gcnPanel, telescopePanel, exoplanetPanel];
+export const PANELS: PanelDefinition<any>[] = [neoPanel, apodPanel, solarSystemPanel, solarPanel, gcnPanel, telescopePanel, exoplanetPanel];

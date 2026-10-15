@@ -54,9 +54,9 @@ export interface PanelView<D> {
 }
 
 /**
- * Everything a dashboard panel needs. To add a panel (v3: the 3D Solar System) implement this
- * interface in src/panels/<name>.ts and register it in src/panels/index.ts. Heavy panels can
- * lazy-load their libraries inside render() with a dynamic import().
+ * Everything a dashboard panel needs. To add a panel implement this interface in
+ * src/panels/<name>.ts and register it in src/panels/index.ts. Heavy panels can lazy-load their
+ * libraries inside render() with a dynamic import() (the 3D Solar System loads three.js that way).
  */
 export interface PanelDefinition<D> {
   id: string;

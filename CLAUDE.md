@@ -44,6 +44,23 @@ Read `README.md` (architecture, commands) and `TASKS.md` (state, known issues, l
   section labels, no pill-shaped buttons. Chart colours follow the validated palette in
   `src/styles/tokens.css` (orange→red is reserved for severity).
 
+## 3D Solar System (v3)
+- **three.js stays out of the main bundle.** Only `src/viz/orrery3d.ts` may import `three`; the panel
+  loads it with `import()` when the view scrolls on screen. Shared numbers (positions, distances,
+  closest approaches) live in `shared/orbit.ts` and `src/viz/orrery-model.ts` (no three.js), so the
+  list, details and the no-WebGL fallback work without the 3D chunk.
+- **Positions are computed in the browser** from published elements: planets from JPL's Table 1
+  (valid 1800–2050; the panel allows 1900–2049), Moon from Meeus' main terms, asteroids as two-body
+  orbits from SBDB. The Worker only fetches elements (`/api/sources/orbits`). Keep the accuracy labels:
+  official CNEOS time/distance next to the model's own, the agreement tag, the epoch warning, and the
+  "distances to scale, dots not" note. `test/orbit.test.ts` checks against JPL Horizons; rerun it after
+  touching the math.
+- **Rendering is on demand** (no frame unless time, camera, selection or theme changes) and stops
+  when the view is off-screen or the tab is hidden. Respect `prefers-reduced-motion` (no damping or
+  camera flights). Test frames in the in-app browser only advance while a screenshot is taken.
+- JPL's SBDB Query API: spaces aren't allowed in `EQ` (use anchored `RE`), the filter must stay
+  under ~1,000 characters (502 otherwise), and `sb-group=neo` makes it ~15× faster.
+
 ## Commands
 - `npm run dev` — local dashboard at http://localhost:5173 (uses `scripts/dev.mjs`, see TASKS.md)
 - `npm test`, `npm run typecheck`, `npm run build`, `npm run check` (all three)
