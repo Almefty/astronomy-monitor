@@ -37,6 +37,10 @@ jump list. The GCN archive list has no dates, so the jump list shows dates only 
       Outer view with all nine labels, no console errors.
 - Note: there is no "follow an asteroid" mode; Re-centre returns to the Sun (Inner/Outer) or Earth (Near Earth).
 
+- [x] Time bar regrouped: Now | ◀ ❚❚ ▶ + speed, divided; the date heading (calendar icon) opens the
+      native date picker (`showPicker()`, hidden input underneath) instead of a "Jump to" field. Phones: speed
+      is a dropdown, so Now/play/speed fit one row and the slider is full width below (dates under it).
+
 ## Lessons learned (v3.1)
 - **A transparent wide line (`LineMaterial`) looks dotted**: alpha doubles where segments overlap. Use an
   opaque colour pre-mixed with the background instead of opacity.

@@ -110,8 +110,27 @@ function render(root: HTMLElement, result: PanelResult<OrbitsData>) {
     });
     speedGroup.append(b);
   }
-  const dateInput = h("input", { type: "date", class: "orrery-date-input", min: "1900-01-01", max: "2049-12-31", "aria-label": "Jump to date (UTC)" });
-  const jumpLabel = h("label", { class: "orrery-jump" }, h("span", null, "Jump to"), dateInput);
+  // Phones: the same speeds as a compact dropdown, so Now, play and speed fit on one row.
+  const speedSelect = h("select", { class: "orrery-speed-select", "aria-label": "Playback speed" });
+  for (const [rate, label, long] of SPEEDS) {
+    const o = h("option", { value: String(rate), title: long }, `${label}`);
+    speedSelect.append(o);
+  }
+  speedSelect.addEventListener("change", () => {
+    sim.rate = Number(speedSelect.value);
+    syncControls();
+  });
+  // The date heading is the date picker (the native input sits underneath it, visually hidden).
+  const dateInput = h("input", { type: "date", class: "orrery-date-input", min: "1900-01-01", max: "2049-12-31", tabindex: "-1", "aria-hidden": "true" });
+  const dateBtn = h("button", { type: "button", class: "orrery-date-btn", "aria-label": "Choose the date to show (UTC)", title: "Choose a date" }, dateText, icon(ICONS.calendar));
+  dateBtn.addEventListener("click", () => {
+    try {
+      dateInput.showPicker();
+    } catch {
+      dateInput.focus();
+      dateInput.click();
+    }
+  });
 
   const scrub = h("input", { type: "range", class: "orrery-scrub", min: "0", max: "1000", step: "1", "aria-label": "Displayed time within the close-approach window" });
   const scrubMarker = h("span", { class: "orrery-scrub-marker", hidden: true, "aria-hidden": "true" });
@@ -254,8 +273,13 @@ function render(root: HTMLElement, result: PanelResult<OrbitsData>) {
       h(
         "div",
         { class: "orrery-timebar" },
-        h("div", { class: "orrery-date" }, dateText, dateSub),
-        h("div", { class: "orrery-transport" }, nowBtn, backBtn, pauseBtn, fwdBtn, speedGroup, jumpLabel),
+        h("div", { class: "orrery-date" }, h("div", { class: "orrery-date-pick" }, dateBtn, dateInput), dateSub),
+        h(
+          "div",
+          { class: "orrery-transport" },
+          h("div", { class: "orrery-group" }, nowBtn),
+          h("div", { class: "orrery-group", role: "group", "aria-label": "Playback" }, backBtn, pauseBtn, fwdBtn, speedGroup, speedSelect),
+        ),
       ),
       scrubWrap,
       h("div", { class: "orrery-layout" }, stage, side),
@@ -291,6 +315,7 @@ function render(root: HTMLElement, result: PanelResult<OrbitsData>) {
     backBtn.setAttribute("aria-pressed", String(sim.mode === "playing" && sim.dir === -1));
     nowBtn.setAttribute("aria-pressed", String(sim.mode === "now"));
     for (const b of speedGroup.querySelectorAll("button")) b.setAttribute("aria-pressed", String(Number(b.dataset.rate) === sim.rate));
+    speedSelect.value = String(sim.rate);
     for (const b of viewGroup.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.view === sim.view));
     for (const b of astOrbitGroup.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.layer === sim.layers.astOrbits));
   }
