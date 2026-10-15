@@ -130,7 +130,9 @@ The site stays public (portfolio), without Cloudflare Access, on the free plan.
 - [x] Lifetimes (`maxAge` per source): GOES 60 s (live 1 min) · GCN 5 min (live 10 min) · DONKI 10 min
       (live 15 min) · APOD 30 min · close approaches 1 h · telescopes 1 h · exoplanets + catalog 6 h ·
       GCN circular 6 h · status 5 min. `no-store`: errors, 404/405/429, dev sample, partial failures.
-- [x] Cache key = path + query (not host) + Worker version, so each deploy starts fresh. The front Worker
+- [x] Cache key = path + query (not host) + Worker version, so a deploy that changes the Worker code starts
+      fresh. A deploy with unchanged code (docs-only commits) keeps the cache: seen 2026-10-15, a 6 h exoplanet
+      entry survived two docs-only deploys. The front Worker
       forwards only a canonical URL (declared params, clamped, fixed order; no client headers), so junk
       query strings or an `Authorization` header can't bypass the cache.
 - [x] Rate Limiting binding `API_RATE_LIMIT`: 120 requests / 60 s per IPv4 address or IPv6 /64, fails open.
