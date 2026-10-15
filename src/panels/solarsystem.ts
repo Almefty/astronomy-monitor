@@ -6,7 +6,7 @@ import { fmt, metres, relative, utc } from "../core/format";
 import { ICONS } from "../core/icons";
 import type { PanelDefinition, PanelResult } from "../core/panel";
 import { hideTip, showTip } from "../viz/tooltip";
-import type { Orrery, SceneState, ViewId } from "../viz/orrery3d";
+import type { AsteroidOrbitLayer, Layers, Orrery, SceneState, ViewId } from "../viz/orrery3d";
 import {
   agreement, asteroidPosition, asteroidsFrom, AU_PER_LD, BODIES, bodyPositions, earthDistance, fmtDistance, isBodyId, modelApproach,
   planetPeriodDays, TIME_MAX, TIME_MIN, type Asteroid, type BodyId,
@@ -20,6 +20,11 @@ const SPEEDS: [number, string, string][] = [
   [7, "1 wk/s", "1 week per second"],
   [30, "1 mo/s", "30 days per second"],
   [365.25, "1 yr/s", "1 year per second"],
+];
+const AST_ORBIT_LAYERS: [AsteroidOrbitLayer, string, string][] = [
+  ["selected", "Selected", "Only the selected or hovered asteroid’s orbit"],
+  ["upcoming", "Upcoming", "Orbits of asteroids whose closest approach is still ahead at the time shown"],
+  ["all", "All", "Orbits of every asteroid in the list"],
 ];
 const VIEWS: [ViewId, string, string][] = [
   ["inner", "Inner planets", "Sun to Mars"],
@@ -38,6 +43,7 @@ const sim = {
   rate: 1,
   view: "inner" as ViewId,
   selected: null as string | null,
+  layers: { astOrbits: "selected", planetOrbits: true, labels: true } as Layers,
 };
 
 function fullUtc(ms: number): string {
@@ -82,7 +88,7 @@ function render(root: HTMLElement, result: PanelResult<OrbitsData>) {
   const cleanups: (() => void)[] = [];
   let orrery: Orrery | null = null;
 
-  const state = (): SceneState => ({ ms: sim.ms, jd: jdTdb(sim.ms), selected: sim.selected?.startsWith("a:") ? sim.selected.slice(2) : null, view: sim.view });
+  const state = (): SceneState => ({ ms: sim.ms, jd: jdTdb(sim.ms), selected: sim.selected?.startsWith("a:") ? sim.selected.slice(2) : null, view: sim.view, layers: sim.layers });
 
   /* ---------- Time bar */
 
@@ -128,13 +134,80 @@ function render(root: HTMLElement, result: PanelResult<OrbitsData>) {
     viewGroup.append(b);
   }
   const scaleBar = h("div", { class: "orrery-scale", "aria-hidden": "true", hidden: true }, h("span", { class: "bar" }), h("span", { class: "txt" }));
-  const hint = h("div", { class: "orrery-hint" }, "Drag to rotate · scroll or pinch to zoom · tap an object");
+  const hint = h(
+    "div",
+    { class: "orrery-hint" },
+    h("span", { class: "long" }, "Drag to rotate · right-drag or shift+drag to pan (trackpad: two-finger click-drag) · scroll or pinch to zoom · click an object"),
+    h("span", { class: "short" }, "One finger: rotate · two fingers: pan and pinch to zoom · tap an object"),
+  );
   const status = h("div", { class: "orrery-status" }, h("p", null, "Preparing the 3D view…"));
   viewport.append(status);
+
+  /* Layers: a small popover over the view (asteroid orbits, planet orbits, labels). */
+  const layersBtn = h(
+    "button",
+    { type: "button", class: "btn btn-small orrery-layers-btn", "aria-expanded": "false", "aria-controls": "orrery-layers", title: "Choose what the view draws" },
+    icon(ICONS.layers),
+    h("span", { class: "txt" }, "Layers"),
+  );
+  const astOrbitGroup = h("div", { class: "segmented", role: "group", "aria-label": "Asteroid orbits" });
+  for (const [id, label, long] of AST_ORBIT_LAYERS) {
+    const b = h("button", { type: "button", "data-layer": id, title: long }, label);
+    b.addEventListener("click", () => {
+      sim.layers.astOrbits = id;
+      syncControls();
+      orrery?.invalidate();
+    });
+    astOrbitGroup.append(b);
+  }
+  const check = (text: string, key: "planetOrbits" | "labels") => {
+    const input = h("input", { type: "checkbox" });
+    input.checked = sim.layers[key];
+    input.addEventListener("change", () => {
+      sim.layers[key] = input.checked;
+      orrery?.invalidate();
+    });
+    return h("label", { class: "orrery-check" }, input, text);
+  };
+  const layersPanel = h(
+    "div",
+    { class: "orrery-layers", id: "orrery-layers", role: "group", "aria-label": "Layers", hidden: true },
+    h("div", { class: "orrery-layers-label" }, "Asteroid orbits"),
+    astOrbitGroup,
+    check("Planet orbits", "planetOrbits"),
+    check("Labels", "labels"),
+  );
+  let layersOpen = false;
+  const setLayersOpen = (open: boolean) => {
+    layersOpen = open;
+    layersPanel.hidden = !open;
+    layersBtn.setAttribute("aria-expanded", String(open));
+  };
+  layersBtn.addEventListener("click", () => setLayersOpen(!layersOpen));
+  const onDocDown = (ev: PointerEvent) => {
+    if (layersOpen && !layersPanel.contains(ev.target as Node) && !layersBtn.contains(ev.target as Node)) setLayersOpen(false);
+  };
+  const onKey = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape" && layersOpen) {
+      setLayersOpen(false);
+      layersBtn.focus();
+    }
+  };
+  document.addEventListener("pointerdown", onDocDown);
+  document.addEventListener("keydown", onKey);
+  cleanups.push(() => {
+    document.removeEventListener("pointerdown", onDocDown);
+    document.removeEventListener("keydown", onKey);
+  });
+
+  const recenterBtn = h("button", { type: "button", class: "btn btn-small orrery-recenter", hidden: true }, icon(ICONS.recenter), "Re-centre");
+  recenterBtn.addEventListener("click", () => orrery?.recenter());
+  viewport.append(recenterBtn);
+  const tools = h("div", { class: "orrery-tools" }, layersBtn, layersPanel);
   const stage = h(
     "div",
     { class: "orrery-stage" },
-    h("div", { class: "orrery-stage-top" }, viewGroup),
+    h("div", { class: "orrery-stage-top" }, viewGroup, tools),
     viewport,
     h("div", { class: "orrery-stage-bottom" }, scaleBar, hint),
   );
@@ -155,6 +228,11 @@ function render(root: HTMLElement, result: PanelResult<OrbitsData>) {
     );
     b.title = a.orbit ? `Select ${a.label}` : "No orbit available from JPL for this object";
     b.addEventListener("click", () => select(`a:${a.des}`));
+    // Hovering a row previews its orbit (and near Earth, its path) in the view.
+    b.addEventListener("pointerenter", (ev) => {
+      if (ev.pointerType === "mouse" && a.orbit) orrery?.setHover(`a:${a.des}`);
+    });
+    b.addEventListener("pointerleave", () => orrery?.setHover(null));
     const li = h("li", null, b);
     list.append(li);
     rows.set(a.des, { li, now, button: b });
@@ -187,9 +265,11 @@ function render(root: HTMLElement, result: PanelResult<OrbitsData>) {
         h("li", null, h("span", { class: "swatch", style: "--c:var(--sun)" }), "Sun"),
         h("li", null, h("span", { class: "swatch", style: "--c:var(--series-3)" }), "Earth"),
         h("li", null, h("span", { class: "swatch", style: "--c:var(--ink-2)" }), "Planets, Moon"),
-        h("li", null, h("span", { class: "swatch", style: "--c:var(--series-1)" }), "Asteroid"),
-        h("li", null, h("span", { class: "swatch", style: "--c:var(--series-2)" }), "Potentially hazardous (PHA)"),
-        h("li", null, h("span", { class: "swatch", style: "--c:var(--series-1);opacity:.4" }), "Closest approach already passed (at the time shown)"),
+        h("li", null, h("span", { class: "swatch line thick", style: "--c:var(--ink-2)" }), "Planet orbit"),
+        h("li", null, h("span", { class: "swatch small", style: "--c:var(--series-1)" }), "Asteroid, approaching"),
+        h("li", null, h("span", { class: "swatch small", style: "--c:var(--series-2)" }), "Potentially hazardous (PHA)"),
+        h("li", null, h("span", { class: "swatch small", style: "--c:var(--series-1);opacity:.4" }), h("span", { class: "swatch small", style: "--c:var(--series-2);opacity:.4" }), "Closest approach already passed (at the time shown)"),
+        h("li", null, h("span", { class: "swatch line", style: "--c:var(--series-1);opacity:.6" }), "Asteroid orbit (selected or hovered; more under Layers)"),
       ),
       h(
         "p",
@@ -197,7 +277,7 @@ function render(root: HTMLElement, result: PanelResult<OrbitsData>) {
         h("strong", null, "Distances are to scale; the dots are not. "),
         "At true size every planet would be far smaller than a pixel at these distances, so bodies are drawn as fixed-size dots; zoom in close (try Near Earth) and Earth, the Moon and the Sun appear as true-size spheres. ",
         h("strong", null, "Positions are computed in your browser and are approximate: "),
-        "planets from JPL’s published Keplerian elements (Standish; fitted for 1800–2050, errors from about 1,000 km for Venus to ~3 million km for Saturn — far below a pixel here), the Moon from the main terms of Meeus’ lunar theory (~0.01°), asteroids as two-body orbits from JPL Small-Body Database elements (no planetary pulls). For close approaches the official CNEOS time and distance are always shown next to this view’s own estimate. The dashed path in Near Earth view is the selected asteroid’s motion relative to Earth (dots one day apart); the dashed ring is CNEOS’ 0.05 au (19.5 LD) close-approach limit.",
+        "planets from JPL’s published Keplerian elements (Standish; fitted for 1800–2050, errors from about 1,000 km for Venus to ~3 million km for Saturn — far below a pixel here), the Moon from the main terms of Meeus’ lunar theory (~0.01°), asteroids as two-body orbits from JPL Small-Body Database elements (no planetary pulls). For close approaches the official CNEOS time and distance are always shown next to this view’s own estimate. In Near Earth view the dashed path is the selected (or hovered) asteroid’s motion relative to Earth (dots one day apart); the dashed ring is CNEOS’ 0.05 au (19.5 LD) close-approach limit.",
       ),
       announce,
     ),
@@ -212,6 +292,7 @@ function render(root: HTMLElement, result: PanelResult<OrbitsData>) {
     nowBtn.setAttribute("aria-pressed", String(sim.mode === "now"));
     for (const b of speedGroup.querySelectorAll("button")) b.setAttribute("aria-pressed", String(Number(b.dataset.rate) === sim.rate));
     for (const b of viewGroup.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.view === sim.view));
+    for (const b of astOrbitGroup.querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.layer === sim.layers.astOrbits));
   }
 
   let lastListUpdate = 0;
@@ -511,6 +592,7 @@ function render(root: HTMLElement, result: PanelResult<OrbitsData>) {
     status.hidden = false;
     viewport.classList.add("is-fallback");
     viewGroup.hidden = true;
+    tools.hidden = true;
   }
 
   async function start3d() {
@@ -542,16 +624,24 @@ function render(root: HTMLElement, result: PanelResult<OrbitsData>) {
           (scaleBar.firstChild as HTMLElement).style.width = `${Math.round(px)}px`;
           (scaleBar.lastChild as HTMLElement).textContent = `${text} (at the centre of view)`;
         },
+        onPanChange: (panned) => {
+          recenterBtn.hidden = !panned;
+          const centre = sim.view === "earth" ? "Earth" : "the Sun";
+          recenterBtn.title = `Pan back to ${centre} and follow it again`;
+          if (panned) say(`Panned away from ${centre}. Use Re-centre to return.`);
+        },
         onContextLost: () => {
           orrery?.destroy();
           orrery = null;
           scaleBar.hidden = true;
+          recenterBtn.hidden = true;
           showStatus("The 3D view stopped", "The browser reclaimed the graphics context (this can happen on phones when memory runs low).", true);
         },
       });
       status.hidden = true;
       viewport.classList.remove("is-fallback");
       viewGroup.hidden = false;
+      tools.hidden = false;
       orrery.goTo(sim.view, false);
       orrery.setActive(visible);
     } catch (err) {

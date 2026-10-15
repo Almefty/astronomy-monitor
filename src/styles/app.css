@@ -744,6 +744,18 @@ button:disabled:not(.is-busy) {
   height: 2px;
   border-radius: 0;
 }
+.swatch.line.thick {
+  height: 3px;
+}
+.swatch.small {
+  width: 8px;
+  height: 8px;
+  margin-left: 1px;
+  margin-right: 1px;
+}
+.legend li > .swatch.small {
+  margin-top: 5px;
+}
 
 .tooltip {
   position: fixed;
@@ -1940,9 +1952,72 @@ button:disabled:not(.is-busy) {
   right: 10px;
   pointer-events: none;
 }
+.orrery-stage-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
 .orrery-stage-top .segmented {
   pointer-events: auto;
   background: var(--panel);
+}
+.orrery-tools {
+  position: relative;
+  flex: none;
+  pointer-events: auto;
+}
+.orrery-tools[hidden],
+.orrery-layers[hidden],
+.orrery-recenter[hidden] {
+  display: none;
+}
+.orrery-layers-btn,
+.orrery-recenter {
+  background: var(--panel);
+}
+.orrery-layers-btn[aria-expanded="true"] {
+  box-shadow: inset 0 -2px 0 var(--ink);
+}
+.orrery-layers {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100vw - 48px);
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  color: var(--ink);
+}
+.orrery-layers-label {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.orrery-layers .segmented button {
+  height: 28px;
+  font-size: 12.5px;
+}
+.orrery-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.orrery-check input {
+  margin: 0;
+  accent-color: var(--ink);
+}
+.orrery-recenter {
+  position: absolute;
+  z-index: 2;
+  left: 10px;
+  bottom: 10px;
 }
 .orrery-viewport {
   position: relative;
@@ -1977,8 +2052,21 @@ button:disabled:not(.is-busy) {
   white-space: nowrap;
   text-shadow: 0 0 3px var(--panel-2), 0 0 3px var(--panel-2), 0 0 2px var(--panel-2);
 }
-.orrery-label.is-earth {
+.orrery-label.is-earth,
+.orrery-label.is-planet {
   color: var(--ink);
+}
+.orrery-label.is-hover {
+  color: var(--ink-2);
+}
+.orrery-leaders {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-width: 1;
 }
 .orrery-label.is-selected {
   color: var(--ink);
@@ -2178,6 +2266,9 @@ button:disabled:not(.is-busy) {
 .orrery .legend {
   margin-top: 12px;
 }
+.orrery-hint .short {
+  display: none;
+}
 .orrery-honesty strong {
   color: var(--ink-2);
   font-weight: 600;
@@ -2212,7 +2303,13 @@ button:disabled:not(.is-busy) {
     padding: 0 8px;
     font-size: 12.5px;
   }
-  .orrery-hint {
+  .orrery-hint .long {
+    display: none;
+  }
+  .orrery-hint .short {
+    display: inline;
+  }
+  .orrery-layers-btn .txt {
     display: none;
   }
 }

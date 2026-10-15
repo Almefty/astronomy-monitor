@@ -11,6 +11,35 @@ embeds, APOD credits always shown (see "Hardening"). 72 unit tests pass.
 the circular reader runs oldest → newest (1 = first report) with first/newest, a position button and a
 jump list. The GCN archive list has no dates, so the jump list shows dates only for circulars already read.
 **2026-10-15 (v3):** 3D Solar System panel (see "Version 3"). 83 unit tests pass.
+**2026-10-15 (v3.1):** 3D view readability + navigation pass (see "Version 3.1").
+
+# Version 3.1 — 3D readability and navigation (2026-10-15)
+
+- [x] Calm by default: every asteroid is a dot; its orbit (and in Near Earth, its path relative to Earth
+      with day ticks) is drawn only when selected or hovered — in the view or on a list row.
+- [x] Layers popover (top right of the view; icon only on phones): asteroid orbits Selected / Upcoming /
+      All (default Selected), planet orbits (on), labels (on). Not saved across visits, like the rest of the view.
+- [x] Colour by meaning + legend: planets/Moon neutral; planet orbits neutral, 1.6 px (`Line2`), opaque and
+      pre-mixed into the background; asteroid orbits 1 px, status colour (blue; PHA `--series-2`), fainter
+      (bulk 0.2 / 0.09 once passed; selected 0.5) so planet orbits always lead. "Already passed" = faded.
+      One draw call for all bulk orbits (per-vertex RGBA picks which are shown).
+- [x] Planets always visible: planet dots 9 px minimum (asteroids 6), true-size sphere only once it is at least
+      as large as the dot. Labels for the Sun, Earth and planets always shown (Labels layer on); placement
+      tries 8 spots beside the dot, then steps outwards with a leader line; planets placed first, asteroids
+      after; labels avoid each other and planet dots. Only dots that are on screen get a label.
+- [x] Pan: right-drag (trackpad two-finger click-drag), shift+drag, two fingers on touch; scroll/pinch zoom
+      and left/one-finger rotate unchanged. Panning stops following the Sun/Earth; "Re-centre" (bottom left
+      of the view) appears and flies back. Changing view also re-centres. Hint under the view mentions pan
+      (short version on phones). Taps only select with the primary button, no shift, one finger.
+- [x] Verified: dev + production preview, light/dark, 1280 / 375 / 360 px (no horizontal scroll), Inner /
+      Outer / Near Earth, no overlapping or dropped labels (checked with bounding rects), no console errors.
+- Note: there is no "follow an asteroid" mode; Re-centre returns to the Sun (Inner/Outer) or Earth (Near Earth).
+
+## Lessons learned (v3.1)
+- **A transparent wide line (`LineMaterial`) looks dotted**: alpha doubles where segments overlap. Use an
+  opaque colour pre-mixed with the background instead of opacity.
+- **OrbitControls already pans** with right-drag and with ctrl/meta/shift + left-drag; detect a pan by the
+  target moving during `controls.update()` (rotate and zoom keep the target).
 
 # Version 3 — 3D Solar System (2026-10-15)
 

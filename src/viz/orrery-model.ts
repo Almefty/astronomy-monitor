@@ -84,6 +84,13 @@ export function asteroidsFrom(data: OrbitsData): Asteroid[] {
   }));
 }
 
+export type AsteroidStatus = "approaching" | "passed";
+
+/** Before or after its official closest approach, at the displayed time. PHA is a separate flag. */
+export function asteroidStatus(a: Asteroid, ms: number): AsteroidStatus {
+  return a.caMs < ms ? "passed" : "approaching";
+}
+
 export function asteroidPosition(a: Asteroid, jd: number): Vec3 | null {
   return a.orbit ? keplerPosition(a.orbit, jd) : null;
 }
