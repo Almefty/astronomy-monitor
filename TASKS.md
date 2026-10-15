@@ -33,6 +33,8 @@ jump list. The GCN archive list has no dates, so the jump list shows dates only 
       (short version on phones). Taps only select with the primary button, no shift, one finger.
 - [x] Verified: dev + production preview, light/dark, 1280 / 375 / 360 px (no horizontal scroll), Inner /
       Outer / Near Earth, no overlapping or dropped labels (checked with bounding rects), no console errors.
+- [x] Deployed (981d1f3, Workers Builds success) and verified live: Layers control, new hint and legend,
+      Outer view with all nine labels, no console errors.
 - Note: there is no "follow an asteroid" mode; Re-centre returns to the Sun (Inner/Outer) or Earth (Near Earth).
 
 ## Lessons learned (v3.1)
