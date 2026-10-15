@@ -50,6 +50,12 @@ Status: `[x]` done · `[~]` in progress · `[ ]` to do
 - [x] Verified locally: dev + production preview (CSP unchanged, 3D chunk fetched only when scrolled into
       view), 1280/1440 px, 375/360 px (no horizontal scroll), light + dark, playback, jump, hidden-tab pause,
       reduced motion, WebGL fallback, all seven panels load
+- [x] Deployed (c5a7dfc, Workers Builds success) and verified live: `/api/sources/orbits` loads 84/84
+      orbits from Cloudflare (CAD + 3 SBDB calls, ≤ 1 s each), `public, max-age=3600`, repeats are
+      `cf-cache-status: HIT` with the same `fetchedAt` (junk parameters hit the same entry); "Refresh all"
+      updates all seven panels; the 3D chunk loads only when the panel scrolls into view; 1280 px light and
+      375 px dark (no horizontal scroll); the 3D button in the asteroid panel selects the object in Near
+      Earth view; no console errors
 
 ## Lessons learned (v3)
 - **The in-app browser only produces animation frames while a screenshot is taken** (rAF, smooth scroll
