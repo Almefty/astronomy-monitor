@@ -42,6 +42,10 @@ jump list. The GCN archive list has no dates, so the jump list shows dates only 
       is a dropdown, so Now/play/speed fit one row and the slider is full width below (dates under it).
 
 ## Lessons learned (v3.1)
+- **iOS WebKit opens a date picker only when the tap lands on the `<input type="date">` itself**;
+  `showPicker()`/`click()` on a hidden input do nothing there. The input is now a transparent overlay over
+  the heading (desktop clicks still call `showPicker()`, the button underneath keeps keyboard + label).
+  Checked with Playwright WebKit (iPhone 13 emulation + desktop): taps hit and focus the input.
 - **A transparent wide line (`LineMaterial`) looks dotted**: alpha doubles where segments overlap. Use an
   opaque colour pre-mixed with the background instead of opacity.
 - **OrbitControls already pans** with right-drag and with ctrl/meta/shift + left-drag; detect a pan by the

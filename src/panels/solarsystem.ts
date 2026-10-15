@@ -123,14 +123,18 @@ function render(root: HTMLElement, result: PanelResult<OrbitsData>) {
   // The date heading is the date picker (the native input sits underneath it, visually hidden).
   const dateInput = h("input", { type: "date", class: "orrery-date-input", min: "1900-01-01", max: "2049-12-31", tabindex: "-1", "aria-hidden": "true" });
   const dateBtn = h("button", { type: "button", class: "orrery-date-btn", "aria-label": "Choose the date to show (UTC)", title: "Choose a date" }, dateText, icon(ICONS.calendar));
-  dateBtn.addEventListener("click", () => {
+  // Pointer taps land on the transparent input over the heading (the only way iOS WebKit opens its
+  // picker). Desktop Chromium only opens it from its own icon, so ask for it explicitly; the button
+  // underneath keeps keyboard focus and the accessible label (Enter/Space → showPicker).
+  const openPicker = () => {
     try {
       dateInput.showPicker();
     } catch {
-      dateInput.focus();
-      dateInput.click();
+      /* not supported or not allowed: WebKit's own tap handling still opens it */
     }
-  });
+  };
+  dateInput.addEventListener("click", openPicker);
+  dateBtn.addEventListener("click", openPicker);
 
   const scrub = h("input", { type: "range", class: "orrery-scrub", min: "0", max: "1000", step: "1", "aria-label": "Displayed time within the close-approach window" });
   const scrubMarker = h("span", { class: "orrery-scrub-marker", hidden: true, "aria-hidden": "true" });
