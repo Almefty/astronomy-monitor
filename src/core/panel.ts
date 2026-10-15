@@ -103,6 +103,8 @@ export class PanelHost<D = unknown> {
   result: PanelResult<D> | null = null;
   params: Record<string, string> = {};
   busy = false;
+  /** The newest non-quiet refresh, so a request it aborted can report its outcome. */
+  private latest: { token: object; done: Promise<boolean> } | null = null;
 
   constructor(
     readonly def: PanelDefinition<D>,
@@ -157,21 +159,38 @@ export class PanelHost<D = unknown> {
    * Load fresh data. A quiet refresh (live mode) doesn't dim the panel, and if it fails while
    * data is shown, the data stays and the header says the update failed. Resolves to success.
    */
-  async refresh(extraParams: Record<string, string> = {}, opts: { quiet?: boolean } = {}): Promise<boolean> {
-    if (opts.quiet && this.busy) return false;
+  refresh(extraParams: Record<string, string> = {}, opts: { quiet?: boolean } = {}): Promise<boolean> {
+    if (opts.quiet && this.busy) return Promise.resolve(false);
+    const token = {};
+    const done = this.load(extraParams, opts, token);
+    // Only a non-quiet refresh can abort one in flight (a quiet one skips a busy panel).
+    if (!opts.quiet) this.latest = { token, done };
+    return done;
+  }
+
+  /**
+   * An aborted request was replaced by a newer refresh of this panel, so it resolves to that
+   * one's outcome: "Refresh all" counts the panel as loaded if the replacement succeeded.
+   */
+  private superseded(token: object): Promise<boolean> | boolean {
+    const latest = this.latest;
+    return latest && latest.token !== token ? latest.done : false;
+  }
+
+  private async load(extraParams: Record<string, string>, opts: { quiet?: boolean }, token: object): Promise<boolean> {
     this.controller?.abort();
     const controller = new AbortController();
     this.controller = controller;
     this.setBusy(true, !!opts.quiet);
     try {
       const result = await this.def.load(controller.signal, { ...this.params, ...extraParams }, this.result);
-      if (controller.signal.aborted) return false;
+      if (controller.signal.aborted) return this.superseded(token);
       this.liveError = null;
       this.show(result, false);
       if (this.def.persist !== false && !result.notices.some((n) => n.text.startsWith("SAMPLE DATA")) && !extraParams.sample) save(`snap:${this.def.id}`, result);
       return true;
     } catch (err) {
-      if (controller.signal.aborted) return false;
+      if (controller.signal.aborted) return this.superseded(token);
       const showingData = !!this.result && !this.body.querySelector(".panel-body > .error-state");
       if (showingData && isRateLimited(err)) {
         // The server's per-client limit: keep the data on screen and say so in the header.

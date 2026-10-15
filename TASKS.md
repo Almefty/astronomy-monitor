@@ -15,6 +15,10 @@ the circular reader runs oldest → newest (1 = first report) with first/newest,
 jump list. The GCN archive list has no dates, so the jump list shows dates only for circulars already read.
 **2026-10-15 (v3):** 3D Solar System panel (see "Version 3"). 83 unit tests pass.
 **2026-10-15 (v3.1):** 3D view readability + navigation pass (see "Version 3.1").
+**2026-10-15 (fix):** "Refresh all" undercounted since the Workers Cache: it counted a panel as updated only if
+its `fetchedAt` was newer than the click, so cached answers looked like failures ("0 of 7 panels updated").
+It now counts requests that succeeded (a request overtaken by a newer refresh of the same panel takes that
+one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming failed panels.
 
 # Version 3.1 — 3D readability and navigation (2026-10-15)
 

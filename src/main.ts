@@ -9,7 +9,7 @@ import "./styles/app.css";
 
 import { fetchStatus } from "./core/api";
 import { h, icon } from "./core/dom";
-import { localTime } from "./core/format";
+import { age, localTime } from "./core/format";
 import { ICONS } from "./core/icons";
 import { LiveMode } from "./core/live";
 import { PanelHost, type AppContext } from "./core/panel";
@@ -76,18 +76,45 @@ const lastAll = h(
   hosts.some((host) => host.result) ? "Showing data saved from your last visit — press Refresh all for live data" : "Press Refresh all to load live data",
 );
 
+/** The last "Refresh all": when it ran and which panels failed. */
+let lastRefresh: { at: string; failed: string[] } | null = null;
+
+/**
+ * "Refreshed 14:20 · 7 of 7 panels loaded · oldest data 25 min old". A panel counts as loaded when
+ * its request succeeded, even if Cloudflare answered from its cache; the age is that of the oldest
+ * data on screen (each panel's own stamp shows its age), so it is recomputed as time passes.
+ */
+function renderLastAll() {
+  if (!lastRefresh) return;
+  const { at, failed } = lastRefresh;
+  const parts = [`Refreshed ${localTime(at)}`, `${hosts.length - failed.length} of ${hosts.length} panels loaded`];
+  if (failed.length) parts.push(`failed: ${failed.join(", ")}`);
+  const oldest = hosts
+    .filter((host) => !failed.includes(host.def.title))
+    .map((host) => host.result?.fetchedAt)
+    .filter((t): t is string => !!t)
+    .sort()[0];
+  if (oldest) parts.push(age(oldest) === "moments" ? "all data under a minute old" : `oldest data ${age(oldest)} old`);
+  lastAll.textContent = parts.join(" · ");
+}
+
 async function refreshAll() {
   if (refreshAllBtn.disabled) return;
   refreshAllBtn.disabled = true;
   refreshAllBtn.classList.add("is-busy");
-  const started = new Date().toISOString();
+  const at = new Date().toISOString();
   const results = await Promise.allSettled(hosts.map((host) => host.refresh()));
-  void results;
   refreshAllBtn.disabled = false;
   refreshAllBtn.classList.remove("is-busy");
-  const ok = hosts.filter((host) => host.result && host.result.fetchedAt >= started).length;
-  lastAll.textContent = `Last full refresh ${localTime(started)} · ${ok} of ${hosts.length} panels updated`;
+  const failed = hosts.filter((_, i) => {
+    const r = results[i]!;
+    return r.status !== "fulfilled" || !r.value;
+  });
+  lastRefresh = { at, failed: failed.map((host) => host.def.title) };
+  renderLastAll();
 }
+hosts.forEach((host) => host.onChange(renderLastAll));
+setInterval(renderLastAll, 60_000);
 refreshAllBtn.addEventListener("click", () => void refreshAll());
 
 /* ---------- Live mode (opt-in; off on every visit) */
