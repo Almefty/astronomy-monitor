@@ -53,6 +53,14 @@ one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming
       (2009-04-05), no console errors. **Playwright WebKit** (iPhone 13 emulation at 390/375/360 px incl.
       dark, and desktop): the tap lands on and focuses the native date input, linked day, missing day, Random
       day and Back to today work, no errors, no horizontal scroll.
+- [x] Deployed (5e1dc69, Workers Builds success) and verified live: `apod-archive` sends
+      `public, max-age=86400, s-maxage=2592000` for past weeks (`max-age=1800` for the current week); a
+      repeat for another day of the same week is a `cf-cache-status: HIT` with the first answer's
+      `fetchedAt` (so `s-maxage` is accepted by Workers Cache); junk parameters share the entry. UI: linked
+      5 Apr 2009 (Flash video → "Watch on NASA's site", credit shown), missing 30 Jun 2000 → 29 Jun / 1 Jul,
+      8 random days (1997–2022, incl. the "Powers of Ten" YouTube video of 4 Dec 2022), Back to today; WebKit
+      (iPhone 390/375/360 dark, desktop) and the in-app browser at 375 px light; no console errors, no
+      horizontal scroll.
 
 ## Lessons learned (APOD archive)
 - **Don't reset an `<input type="date">` before the new day has loaded**: a second `change` (Playwright's
