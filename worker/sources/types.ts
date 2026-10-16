@@ -11,6 +11,8 @@ export interface SourceContext {
   notices: Notice[];
   /** Mark this response as not cacheable (sample data, a partial failure the user should retry). */
   noCache(): void;
+  /** Cache this response for a shorter time than the source's `maxAge` (e.g. the APOD week holding today). */
+  cacheFor(seconds: number): void;
 }
 
 /**
@@ -25,6 +27,8 @@ export interface SourceModule<K extends SourceId = SourceId> extends SourceInfo 
    * fast the source changes, and keep it at or below the live-mode interval for live feeds.
    */
   maxAge: number;
+  /** Shorter lifetime for browsers (sent as max-age, with `maxAge` as s-maxage for Cloudflare's cache). */
+  browserMaxAge?: number;
   /** The query parameters load() reads; everything else is dropped from the cache key. */
   params?: ParamSpec;
   load(ctx: SourceContext): Promise<SourceDataMap[K]>;

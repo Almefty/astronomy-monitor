@@ -1,5 +1,5 @@
 import type { SourceId } from "../../shared/contract";
-import { apodSource } from "./apod";
+import { apodArchiveSource, apodSource } from "./apod";
 import { exoplanetSource } from "./exoplanets";
 import { gcnSource } from "./gcn";
 import { goesSource } from "./goes";
@@ -15,6 +15,7 @@ export const SOURCES: { [K in SourceId]: SourceModule<K> } = {
   solar: solarSource,
   exoplanets: exoplanetSource,
   apod: apodSource,
+  "apod-archive": apodArchiveSource,
   gcn: gcnSource,
   telescopes: telescopeSource,
   goes: goesSource,

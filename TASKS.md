@@ -18,10 +18,48 @@ jump list. The GCN archive list has no dates, so the jump list shows dates only 
 **2026-10-15 (public):** the repository is public at https://github.com/Almefty/astronomy-monitor (MIT; history
 rewritten to remove personal details, commit times shown in UTC, so commit hashes differ from the private
 archive `Almefty/astronomy-monitor-archive`). Workers Builds deploys from the public repository.
+**2026-10-16 (APOD archive):** date picker, Random day and shareable `?apod=` links for the whole APOD
+archive since 16 Jun 1995 (see "APOD archive browsing"). 97 unit tests pass.
 **2026-10-15 (fix):** "Refresh all" undercounted since the Workers Cache: it counted a panel as updated only if
 its `fetchedAt` was newer than the click, so cached answers looked like failures ("0 of 7 panels updated").
 It now counts requests that succeeded (a request overtaken by a newer refresh of the same panel takes that
 one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming failed panels.
+
+# APOD archive browsing (2026-10-16)
+
+- [x] Source verified live (16 Oct 2026): `apod-basic` takes `date_from`/`date_to` as **YYMMDD** (4-digit years →
+      400), max **25 per page**, newest first, `_fields=date` works, `order=asc` is ignored, `search=` is ignored.
+      A missing day returns `[]`. Archive starts **1995-06-16**; no entry for 1995-06-17…19 and 2000-06-30
+      (scanned 1995–2000 and 2008–2012). 11,436 entries. No `api.nasa.gov` (offline 1 Dec 2026).
+- [x] Worker source `apod-archive?week=` (date → Monday, clamped to 16 Jun 1995 … today, junk → current week):
+      1 upstream call per week; for an empty week 2 date-only calls name the nearest days. Past weeks
+      `public, max-age=86400, s-maxage=2592000`; the week holding today (or ending yesterday) 30 min
+      (`cacheFor()`); failures `no-store`. New `SourceModule.browserMaxAge`.
+- [x] Old entries: placeholder `hdurl` → picture from the page body (`<img>` + wrapping link), `/content/dam/`
+      JPEG/PNG resized via `/dynamicimage/assets/` (GIF 404s there), media types `video`/`iframe`/`null`,
+      Flash/MPEG/QuickTime → `videoKind: "external"` (poster + "Watch on NASA's site"; CSP unchanged),
+      empty entries (1997-03-04, 2011-05-26) → "no preview" + link, credit labels cleaned (incl. 1997 title
+      line and 2008 "Credit & Copyright" without colon), 2009 digg leftovers stripped.
+- [x] Panel: day bar (shown date = native date picker overlay, "Today's picture" / "This week" / "From the
+      archive"), Random day, Back to today, status line (missing day → nearest days incl. the next week;
+      before 1995-06-16 / future → explained), week filmstrip ("Week of …", 7 columns), dark tiles for
+      entries without thumbnails. `?apod=YYYY-MM-DD` follows the shown day (`replaceState`); a linked day is
+      offered with a button (no fetch without a press), restored from memory after a refresh.
+- [x] Random day: uniform date → its week → random entry ≠ current; ≤ 4 quiet retries; 429 stops; never
+      an error state. Buttons disabled while loading; weeks kept in memory for the visit.
+- [x] Tests: `test/apod.test.ts` (14, real rows in `test/fixtures/apod-archive-2026-10-16.json`). 97 in total.
+- [x] Verified locally (production preview): 1280 / 375 / 360 px, light + dark, no horizontal scroll,
+      missing days, out-of-range dates, linked day, Random day ×6, YouTube embed (2008-11-25), Flash entry
+      (2009-04-05), no console errors. **Playwright WebKit** (iPhone 13 emulation at 390/375/360 px incl.
+      dark, and desktop): the tap lands on and focuses the native date input, linked day, missing day, Random
+      day and Back to today work, no errors, no horizontal scroll.
+
+## Lessons learned (APOD archive)
+- **Don't reset an `<input type="date">` before the new day has loaded**: a second `change` (Playwright's
+  `fill` sends one, so can a picker) then re-opened the old day. Reset it only when nothing new opens.
+- **A long browser cache outlives a fix**: testing kept serving a pre-fix 30-day response from the browser
+  cache. Long-lived answers now send a short `max-age` for browsers and a long `s-maxage` for Cloudflare.
+- **`assets.science.nasa.gov/content/dam/…` ignores `?w=`**; the same path under `/dynamicimage/assets/` resizes.
 
 # Version 3.1 — 3D readability and navigation (2026-10-15)
 

@@ -6,7 +6,7 @@
  * touch one Worker module, never the visualizations.
  */
 
-export type SourceId = "neo" | "solar" | "exoplanets" | "apod" | "gcn" | "telescopes" | "goes" | "orbits";
+export type SourceId = "neo" | "solar" | "exoplanets" | "apod" | "apod-archive" | "gcn" | "telescopes" | "goes" | "orbits";
 
 export type KeyMode = "secret" | "demo";
 
@@ -272,9 +272,13 @@ export interface ApodEntry {
   /** Full-resolution image. */
   hdUrl: string | null;
   thumbUrl: string | null;
-  /** For videos: an embeddable player URL (YouTube/Vimeo) or a direct video file. */
+  /**
+   * For videos: an embeddable player URL (YouTube/Vimeo, "embed"), a video file the browser can play
+   * ("file"), or a video that can't be played here ("external": Flash players, MPEG/AVI files, other
+   * hosts; `videoUrl` is then a link to it when there is one, and the panel links to the entry).
+   */
   videoUrl: string | null;
-  videoKind: "embed" | "file" | null;
+  videoKind: "embed" | "file" | "external" | null;
   explanation: string;
   credit: string;
   alt: string;
@@ -287,6 +291,18 @@ export interface ApodData {
   today: ApodEntry;
   /** Recent days, newest first (includes today). */
   recent: ApodEntry[];
+}
+
+/** One week (Monday–Sunday) of the APOD archive, for browsing past days. */
+export interface ApodWeekData {
+  /** Monday and Sunday of the week (ISO dates). */
+  weekStart: string;
+  weekEnd: string;
+  /** The entries published that week, newest first. Missing days (rare, mostly 1995) are simply absent. */
+  entries: ApodEntry[];
+  /** Only when the week has no entries: the nearest published days before and after it. */
+  before: string | null;
+  after: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -433,6 +449,7 @@ export type SourceDataMap = {
   solar: SolarData;
   exoplanets: ExoplanetData;
   apod: ApodData;
+  "apod-archive": ApodWeekData;
   gcn: GcnData;
   telescopes: TelescopeData;
   goes: GoesData;

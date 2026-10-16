@@ -1,5 +1,7 @@
-import type { ApodData, ApodEntry } from "../../shared/contract";
+import { addDaysIso, APOD_FIRST, apodToday, isIsoDate, weekStartOf } from "../../shared/apod";
+import type { ApodData, ApodEntry, ApodWeekData } from "../../shared/contract";
 import { nasaKey } from "../lib/env";
+import type { Param } from "../lib/params";
 import type { Upstream } from "../lib/upstream";
 import { SourceError } from "../lib/upstream";
 import { addDays, decodeEntities, htmlToText, isoDate } from "../lib/util";
@@ -28,6 +30,11 @@ export function sizedImage(url: string | null, size: "display" | "thumb"): strin
   if (!url) return null;
   try {
     const u = new URL(url.startsWith("//") ? `https:${url}` : url);
+    // Archive images live under /content/dam/, which ignores size parameters; the same JPEG/PNG under
+    // /dynamicimage/assets/ is resized (a 2,500 px, 500 KB picture → 19 KB thumbnail). GIFs aren't served there.
+    if (u.hostname === "assets.science.nasa.gov" && /^\/content\/dam\/.+\.(?:jpe?g|png)$/i.test(u.pathname)) {
+      u.pathname = u.pathname.replace(/^\/content\/dam\//, "/dynamicimage/assets/");
+    }
     if (u.hostname === "assets.science.nasa.gov" && u.pathname.startsWith("/dynamicimage/")) {
       u.search = size === "display" ? "?w=1600&fit=clip" : "?w=480&h=320&fit=crop";
     }
@@ -39,6 +46,7 @@ export function sizedImage(url: string | null, size: "display" | "thumb"): strin
 
 export function cleanExplanation(html: string): string {
   return htmlToText(html)
+    .replace(/digg_url\s*=\s*'[^']*';\s*digg_skin\s*=\s*'[^']*';/g, "") // leftovers of 2009-era share buttons
     .replace(/^\s*Explanation:\s*/i, "")
     .replace(/\s*Tomorrow['’]s picture:[\s\S]*$/i, "")
     .trim();
@@ -48,55 +56,96 @@ function youtubeId(src: string): string | null {
   return /youtube(?:-nocookie)?\.com\/embed\/([\w-]{6,})/.exec(src)?.[1] ?? null;
 }
 
+/** Players the panel may embed (the CSP's frame-src); every other iframe is linked instead. */
+const EMBED_HOST = /^(?:(?:www\.|m\.)?youtube(?:-nocookie)?\.com|player\.vimeo\.com)$/i;
+/** Video files browsers play natively. Older APOD movies (MPEG, QuickTime, AVI, Flash) are linked instead. */
+const PLAYABLE_FILE = /\.(?:mp4|m4v|webm|ogv)(?:[?#]|$)/i;
+const VIDEO_FILE = /\.(?:mp4|m4v|webm|ogv|mpe?g|mov|qt|avi|wmv|flv|swf|asf|rm)(?:[?#]|$)/i;
+const IMAGE_FILE = /\.(?:jpe?g|png|gif|webp|tiff?)(?:[?#]|$)/i;
+
+/** Absolute https URL where NASA serves one; relative links resolve against the classic APOD site. */
+export function absUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(decodeEntities(raw.trim()), "https://apod.nasa.gov/apod/");
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (/(^|\.)nasa\.gov$/i.test(u.hostname)) u.protocol = "https:"; // NASA hosts all serve https (the CSP needs it)
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** The classic APOD page body inside basic_html (its <head> repeats the placeholder og:image). */
+function pageBody(html: string): string {
+  const i = html.search(/<body[\s>]/i);
+  return i >= 0 ? html.slice(i) : html;
+}
+
+const attr = (tag: string, name: string) => new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(tag)?.slice(1).find((v) => v !== undefined) ?? null;
+
 /**
  * Plain-text credit line. Some entries repeat the label inside the field ("<strong>Image Credit:</strong> NASA, …");
  * the panel adds its own label, so drop it here.
  */
 export function creditText(raw: string | undefined): string {
   return htmlToText(raw ?? "")
+    // 1997-era entries put the title on a line of its own before the label ("Hubble Floats Free <br /> Credit:")
+    .replace(/^[^\n]*\n\s*(?=(?:(?:image|video|illustration)\s+)?credits?\b[^\n:]{0,20}:)/i, "")
     .replace(/\s+/g, " ")
-    .replace(/^(?:(?:image|video|illustration)\s+)?credits?(?:\s*(?:&|and)\s*copyright)?\s*:\s*/i, "")
+    // "Image Credit & Copyright:", "Credit:", and (2008-era) "Credit & Copyright" without a colon
+    .replace(/^(?:(?:image|video|illustration)\s+)?credits?(?:\s*(?:&|and)\s*copyright\s*:?|\s*:)\s*/i, "")
     .trim();
 }
 
 interface RawBasic {
-  date: string; title: string; permalink: string; media_type: string; explanation: string;
+  date: string; title: string; permalink: string; media_type: string | null; explanation: string;
   credit?: string; copyright?: string; alt?: string; url?: string; hdurl?: string | null; basic_html?: string;
 }
 
 export function fromBasic(x: RawBasic): ApodEntry {
-  const html = x.basic_html ?? "";
-  const iframe = /<iframe[^>]+src="([^"]+)"/i.exec(html)?.[1] ?? null;
-  const source = /<source[^>]+src="([^"]+)"/i.exec(html)?.[1] ?? /<video[^>]+src="([^"]+)"/i.exec(html)?.[1] ?? null;
+  const body = pageBody(x.basic_html ?? "");
+  const iframe = absUrl(attr(/<iframe\b[^>]*>/i.exec(body)?.[0] ?? "", "src"));
+  const source = absUrl(attr(/<(?:source|video)\b[^>]*\bsrc\b[^>]*>/i.exec(body)?.[0] ?? "", "src"));
+  // Before ~2015 the API's hdurl is a placeholder; the picture is the first <img> of the page body,
+  // usually wrapped in a link to the full-size file (or, for old movies, to an MPEG/QuickTime file).
+  const pic = /(?:<a\b([^>]*)>\s*)?<img\b([^>]*)>/i.exec(body);
+  const picSrc = pic ? absUrl(attr(pic[2]!, "src")) : null;
+  const picLink = pic?.[1] ? absUrl(attr(pic[1], "href")) : null;
   const rawHd = x.hdurl && !PLACEHOLDER_IMAGE.test(x.hdurl) ? x.hdurl : null;
-  const isVideo = x.media_type === "video";
+  const linkedVideo = picLink && VIDEO_FILE.test(picLink) ? picLink : null;
+  const isVideo = x.media_type === "video" || x.media_type === "iframe" || !!iframe || !!source || !!linkedVideo;
 
   let videoUrl: string | null = null;
   let videoKind: ApodEntry["videoKind"] = null;
-  let poster = rawHd;
+  let poster = rawHd ?? picSrc;
   if (isVideo && iframe) {
-    videoUrl = iframe.startsWith("//") ? `https:${iframe}` : iframe;
-    videoKind = "embed";
+    videoUrl = iframe;
+    videoKind = EMBED_HOST.test(new URL(iframe).hostname) ? "embed" : "external";
     const yt = youtubeId(videoUrl);
     if (yt && !poster) poster = `https://img.youtube.com/vi/${yt}/hqdefault.jpg`;
-  } else if (isVideo && source) {
-    videoUrl = source.startsWith("//") ? `https:${source}` : source;
-    videoKind = "file";
+  } else if (isVideo && (source || linkedVideo)) {
+    videoUrl = (source ?? linkedVideo)!;
+    videoKind = PLAYABLE_FILE.test(videoUrl) ? "file" : "external";
+  } else if (isVideo) {
+    videoKind = "external"; // labelled a video, but nothing on the page we can play or link
   }
 
+  const fullSize = rawHd ?? (picLink && IMAGE_FILE.test(picLink) ? picLink : picSrc);
   return {
     date: x.date,
-    title: htmlToText(x.title),
-    mediaType: isVideo ? "video" : x.media_type === "image" ? "image" : "other",
+    // A few broken entries carry the page title ("APOD: 2011 May 26 – Supernova Sonata").
+    title: htmlToText(x.title).replace(/^APOD:\s*\d{4}\s+\w+\s+\d{1,2}\s*[–—-]\s*/, ""),
+    mediaType: isVideo ? "video" : x.media_type === "image" || poster ? "image" : "other",
     imageUrl: sizedImage(poster, "display"),
     // The new site's hdurl already carries the original pixel size (?w=…&h=…&fit=clip).
-    hdUrl: isVideo ? null : rawHd,
+    hdUrl: isVideo ? null : fullSize,
     thumbUrl: sizedImage(poster, "thumb"),
     videoUrl,
     videoKind,
     explanation: cleanExplanation(x.explanation ?? ""),
     credit: creditText(x.credit || x.copyright),
-    alt: htmlToText(x.alt ?? ""),
+    alt: htmlToText(x.alt ?? "").replace(/^See Explanation\.\s*Clicking on the picture will download the highest resolution version available\.$/i, ""),
     permalink: x.permalink || x.url || "https://science.nasa.gov/apod/",
   };
 }
@@ -192,10 +241,7 @@ async function loadFeed(upstream: Upstream): Promise<ApodEntry[]> {
   return rows.map(fromBasic).sort((a, b) => b.date.localeCompare(a.date));
 }
 
-/** Today's APOD date. APOD posts at about 00:05 US Eastern, so "today" is the New York calendar date. */
-export function apodToday(now: Date): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
-}
+export { apodToday };
 
 const shortDate = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
@@ -280,6 +326,84 @@ export const apodSource: SourceModule<"apod"> = {
       }
     }
     const data: ApodData = { via, today: entries![0]!, recent: entries!.slice(0, 8) };
+    return data;
+  },
+};
+
+/* ------------------------------------------------------------------ */
+/* Archive: one week per request                                       */
+/* ------------------------------------------------------------------ */
+
+/** Past weeks never change, so they are cached for 30 days; the current week only as long as today's APOD. */
+export const ARCHIVE_MAX_AGE = 30 * 86_400;
+
+const yymmddIso = (iso: string) => iso.slice(2).replace(/-/g, "");
+
+/**
+ * Any date → the Monday of its week, clamped to the archive (16 Jun 1995 … today); anything else → the
+ * current week. Requests for the same week share one cache entry, so "Random day" and the date picker
+ * reuse each other's answers, and at most ~1,700 distinct entries exist.
+ */
+export const weekParam: Param<string> = (raw) => {
+  const today = apodToday(new Date());
+  const iso = isIsoDate(raw) ? raw : today;
+  return weekStartOf(iso < APOD_FIRST ? APOD_FIRST : iso > today ? today : iso);
+};
+
+/** Nearest published days around an empty week (one small query each; dates only). */
+async function neighbours(upstream: Upstream, weekStart: string, weekEnd: string, today: string): Promise<[string | null, string | null]> {
+  const dateOf = (rows: { date: string }[] | null, pick: "first" | "last") => {
+    const d = Array.isArray(rows) && rows.length ? rows[pick === "first" ? 0 : rows.length - 1]!.date : null;
+    return isIsoDate(d) ? d : null;
+  };
+  const beforeEnd = addDaysIso(weekStart, -1);
+  const afterStart = addDaysIso(weekEnd, 1);
+  const [before, after] = await Promise.all([
+    beforeEnd < APOD_FIRST
+      ? null
+      : upstream
+          .json<{ date: string }[]>("APOD archive (day before)", `${APOD_BASIC}?${new URLSearchParams({ date_to: yymmddIso(beforeEnd), per_page: "1", _fields: "date" })}`)
+          .then((r) => dateOf(r, "first")), // newest first
+    afterStart > today
+      ? null
+      : upstream
+          .json<{ date: string }[]>(
+              "APOD archive (day after)",
+              `${APOD_BASIC}?${new URLSearchParams({ date_from: yymmddIso(afterStart), date_to: yymmddIso(addDaysIso(afterStart, 24)), per_page: "25", _fields: "date" })}`,
+            )
+          .then((r) => dateOf(r, "last")),
+  ]);
+  return [before, after];
+}
+
+export const apodArchiveSource: SourceModule<"apod-archive"> = {
+  id: "apod-archive",
+  title: "Astronomy Picture of the Day — archive",
+  provider: "NASA APOD · science.nasa.gov",
+  docsUrl: "https://science.nasa.gov/apod/archive/",
+  maxAge: ARCHIVE_MAX_AGE,
+  browserMaxAge: 86_400,
+  params: { week: weekParam },
+
+  async load({ upstream, params, now, cacheFor }) {
+    const weekStart = weekParam(params.get("week"));
+    const weekEnd = addDaysIso(weekStart, 6);
+    const today = apodToday(now);
+    // The week that holds today (or ended yesterday) can still gain an entry.
+    if (weekEnd >= addDaysIso(today, -1)) cacheFor(apodSource.maxAge);
+
+    const q = new URLSearchParams({ date_from: yymmddIso(weekStart), date_to: yymmddIso(weekEnd), per_page: "7" });
+    const rows = await upstream.json<RawBasic[]>("APOD archive (science.nasa.gov)", `${APOD_BASIC}?${q}`);
+    if (!Array.isArray(rows)) throw new SourceError("parse", "science.nasa.gov returned no list of APOD entries.");
+    const entries = rows
+      .filter((r) => isIsoDate(r?.date) && r.date >= weekStart && r.date <= weekEnd)
+      .map(fromBasic)
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    let before: string | null = null;
+    let after: string | null = null;
+    if (!entries.length) [before, after] = await neighbours(upstream, weekStart, weekEnd, today);
+    const data: ApodWeekData = { weekStart, weekEnd, entries, before, after };
     return data;
   },
 };

@@ -24,12 +24,17 @@ const BASE_HEADERS: Record<string, string> = {
  * anything else is `no-store`. Every /api response states this explicitly: without it, Workers Cache
  * applies heuristic lifetimes (2 h for a 200).
  */
-export function cacheControl(maxAge: number): string {
-  return maxAge > 0 ? `public, max-age=${Math.floor(maxAge)}` : "no-store";
+export function cacheControl(maxAge: number, browserMaxAge = maxAge): string {
+  if (maxAge <= 0) return "no-store";
+  // A browser keeps a long-lived answer (APOD archive weeks) for less time than Cloudflare's cache, so a
+  // deploy that fixes how entries are read reaches visitors within a day (the edge cache restarts per deploy).
+  return browserMaxAge < maxAge
+    ? `public, max-age=${Math.floor(browserMaxAge)}, s-maxage=${Math.floor(maxAge)}`
+    : `public, max-age=${Math.floor(maxAge)}`;
 }
 
-export function json(body: unknown, status = 200, maxAge = 0, extra: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), { status, headers: { ...BASE_HEADERS, "cache-control": cacheControl(maxAge), ...extra } });
+export function json(body: unknown, status = 200, maxAge = 0, extra: Record<string, string> = {}, browserMaxAge = maxAge): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...BASE_HEADERS, "cache-control": cacheControl(maxAge, browserMaxAge), ...extra } });
 }
 
 function errorResponse(source: string, err: unknown, upstream: Upstream): Response {
@@ -103,13 +108,22 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   const upstream = new Upstream();
   const notices: Notice[] = [];
   let cacheable = true;
+  let maxAge = source.maxAge;
   try {
-    const data = await source.load({ env, upstream, params: url.searchParams, now: new Date(), notices, noCache: () => (cacheable = false) });
+    const data = await source.load({
+      env,
+      upstream,
+      params: url.searchParams,
+      now: new Date(),
+      notices,
+      noCache: () => (cacheable = false),
+      cacheFor: (seconds) => (maxAge = Math.min(maxAge, seconds)),
+    });
     const body: Envelope<unknown> = { source: source.id, fetchedAt: new Date().toISOString(), data, upstream: upstream.calls, notices };
     // A partial failure (a failed upstream call, a warning) is served but not cached, so the next
     // request tries again instead of everyone seeing the degraded result for the full lifetime.
     const degraded = !cacheable || upstream.calls.some((c) => !c.ok) || notices.some((n) => n.level === "warning");
-    return json(body, 200, degraded ? 0 : source.maxAge);
+    return json(body, 200, degraded ? 0 : maxAge, {}, source.browserMaxAge ?? maxAge);
   } catch (err) {
     return errorResponse(source.id, err, upstream);
   }
