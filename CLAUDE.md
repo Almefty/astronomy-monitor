@@ -70,3 +70,6 @@ commands) and `TASKS.md` (state, known issues, lessons) first.
 - `npm run dev` — local dashboard at http://localhost:5173 (uses `scripts/dev.mjs`, see TASKS.md)
 - `npm test`, `npm run typecheck`, `npm run build`, `npm run check` (all three)
 - Commit messages end with the attribution line the harness provides.
+- Commits made by Claude in cloud sessions (author "Claude") also end with
+  `Co-authored-by: Almefty <179997323+Almefty@users.noreply.github.com>`, so they count in the
+  maintainer's GitHub contributions once merged into `main`. Never use the maintainer's private email.
