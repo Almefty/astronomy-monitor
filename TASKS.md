@@ -24,6 +24,48 @@ archive since 16 Jun 1995 (see "APOD archive browsing"). 97 unit tests pass.
 its `fetchedAt` was newer than the click, so cached answers looked like failures ("0 of 7 panels updated").
 It now counts requests that succeeded (a request overtaken by a newer refresh of the same panel takes that
 one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming failed panels.
+**2026-11-01 (v4, PR 1 of 3):** topocentric astronomy math for the coming "Sky tonight" panel
+(`shared/sky.ts`, no UI yet; see "Version 4 — Sky tonight" and `docs/plans/sky-tonight.md`). 125 unit tests pass.
+
+# Version 4 — Sky tonight (in progress, plan in `docs/plans/sky-tonight.md`)
+
+## PR 1 — topocentric math (2026-11-01)
+- [x] `shared/sky.ts` (pure, no DOM, no three.js, not imported by the frontend yet, so the bundle is
+      unchanged): GMST (IAU 1982), J2000 → date precession (IAU 1976), equatorial → horizontal, WGS 84
+      observer position and topocentric parallax, Sæmundsson/Bennett refraction (display only), Meeus ch. 25
+      Sun (with aberration), Moon via `moonGeocentric`, planets via `planetPosition − earthPosition` with one
+      light-time iteration, Moon phase (illumination, phase angle, name, age, principal-phase times), planet
+      magnitudes (Mallama & Hilton 2018) and Sun elongation, a generic crossing finder (10-min scan +
+      bisection to 1 s), rise/transit/set with `normal` / `always-up` / `never-up`, noon-to-noon night events
+      with `time` / `always-above` / `always-below` / `none`, `Intl` time-zone helpers, preset places, 0.01°
+      rounding. `shared/astro.ts` `sunPosition` untouched (the telescope panel uses it).
+- [x] Sources verified live (2026-11-01): JPL Horizons API observer tables (`EPHEM_TYPE`, not
+      `EPHEMERIS_TYPE`; `CENTER='coord@399'`, `SITE_COORD='E-lon,lat,km'`, `TLIST` in UT), USNO
+      `api/rstt/oneday` (only civil twilight; polar cases say "Object continuously above/below the Horizon")
+      and `api/moon/phases/date`. Fixture `test/fixtures/sky-reference.json` (49 KB), rebuilt by
+      `scripts/fetch-sky-fixtures.mjs`. Nautical/astronomical twilight references come from Horizons' Sun
+      elevation at 1-minute steps (USNO's one-day API doesn't give them).
+- [x] Accuracy (Jakarta, Tromsø, Cape Town; 6 epochs 2026-11 → 2027-09; 4 days incl. Tromsø polar night
+      and polar day). Worst cases vs Horizons: Sun 0.003°, Moon 0.007°, Mercury–Mars ≤ 0.010°, Uranus/Neptune
+      ≤ 0.014°, Jupiter 0.038°, **Saturn 0.076°** (JPL Table 1's error, up to 600″, so it may exceed 0.1° on
+      other dates); magnitudes ≤ 0.04 (Saturn's ring term uses the Earth's tilt only); Moon illumination 0.003
+      percentage points. Twilight/sunrise/sunset vs Horizons ≤ 0.04 min; Sun and Moon rise/transit/set and
+      civil twilight vs USNO ≤ 0.93 min; 24 principal Moon phases vs USNO ≤ 1.8 min. Test limits are the
+      plan's (0.1° / 0.2° / 2 min / 0.2 mag).
+- [x] Speed: one full night (Sun events + Moon + 7 planets rise/transit/set + phase + magnitudes) ≈ 20 ms
+      warm in Node on the cloud container; measure on a phone in PR 3.
+- Known limits: nutation and planetary aberration ignored (≤ 0.006°); UT1 = UTC; Horizons applies the
+  Mercury polynomial beyond the paper's 170° phase angle, so we do too; a horizon dip shorter than the
+  10-min scan can be missed (a body grazing the horizon near the poles).
+
+## Lessons learned (v4)
+- **Node's built-in `fetch` ignores `HTTPS_PROXY`**: in the cloud container run fixture scripts with
+  `NODE_USE_ENV_PROXY=1` (it returned 503s without it). curl works as is.
+- **Horizons quantity 4 is airless by default** ("Atmos refraction: NO"), so it compares directly with
+  geometric altitudes; quantity 1 is *topocentric* astrometric RA/Dec when `CENTER` is a site.
+- **`asin` loses precision near ±90°** (alt at the zenith came out 89.999999°); `atan2(up, horizontal)` doesn't.
+- arxiv.org is not on the cloud allowlist; the Mallama & Hilton coefficients were checked against Horizons'
+  magnitudes instead (same model).
 
 # APOD archive browsing (2026-10-16)
 
