@@ -25,5 +25,13 @@
   "ratelimits": [{ "name": "API_RATE_LIMIT", "namespace_id": "1001", "simple": { "limit": 120, "period": 60 } }],
   // Non-secret configuration. The NASA key is NOT here: it is a Worker secret
   // (NASA_API_KEY) set in the Cloudflare dashboard, and in .dev.vars locally.
-  "vars": { "APP_ENV": "production" }
+  "vars": { "APP_ENV": "production" },
+  // Preview deployments (`wrangler preview`, run by Workers Builds for every non-`main` branch)
+  // must declare their own bindings. Own rate-limit namespace so preview traffic never counts
+  // against production's; any APP_ENV other than "development" behaves like production.
+  // Previews don't get the production NASA_API_KEY secret, so they fall back to DEMO_KEY.
+  "previews": {
+    "vars": { "APP_ENV": "preview" },
+    "ratelimits": [{ "name": "API_RATE_LIMIT", "namespace_id": "1002", "simple": { "limit": 120, "period": 60 } }]
+  }
 }
