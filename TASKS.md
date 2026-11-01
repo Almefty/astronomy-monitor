@@ -66,6 +66,10 @@ one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming
 - **`asin` loses precision near ±90°** (alt at the zenith came out 89.999999°); `atan2(up, horizontal)` doesn't.
 - arxiv.org is not on the cloud allowlist; the Mallama & Hilton coefficients were checked against Horizons'
   magnitudes instead (same model).
+- **Workers Builds runs `wrangler preview` (open beta) for non-`main` branches**, and it fails unless
+  `wrangler.jsonc` has a `previews` block declaring every binding (it failed on this branch from the first
+  commit). Previews use `APP_ENV: "preview"` and their own rate-limit namespace (`1002`); they don't get
+  the production `NASA_API_KEY` secret (`wrangler preview secret` manages preview secrets).
 
 # APOD archive browsing (2026-10-16)
 
