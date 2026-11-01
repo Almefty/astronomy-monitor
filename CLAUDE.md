@@ -19,6 +19,9 @@ commands) and `TASKS.md` (state, known issues, lessons) first.
   only, never for `default`, or every static-asset request would count toward the 100k/day quota. Every
   `/api` response must send an explicit `Cache-Control`: `maxAge` per source (≤ its live-mode interval),
   `no-store` for errors, sample data and partial failures (`noCache()` / failed upstream call / warning).
+  **One deliberate exception:** a source may declare `failureMaxAge` to cache its failed and partial answers
+  briefly instead — only for upstreams whose usage policy says to stop querying after errors (CelesTrak: 600 s,
+  see `worker/sources/satellites.ts`). Don't add it elsewhere.
   A new query parameter must be declared in the source's `params` spec, or it is dropped from the URL.
 - Keep the Worker within the free plan's **10 ms CPU per request**: stream large payloads through
   unparsed (see the exoplanet catalog), and stop parsing once you have what you need.
@@ -70,7 +73,9 @@ commands) and `TASKS.md` (state, known issues, lessons) first.
 - **satellite.js stays out of the main bundle.** Only `src/viz/passes.ts` may import it (a test checks);
   the panel loads that file with `import()`. Location never leaves the browser (see `docs/plans/sky-tonight.md`).
 - **CelesTrak's usage policy:** GP data updates every 2 hours; keep `maxAge` ≥ 7,200 s, one call per object
-  (`CATNR` takes one number), and stop at the first non-200 answer. Don't fetch whole groups.
+  (`CATNR` takes one number), and stop at the first non-200 answer (its "No GP data found" 404 is an answer
+  about one object, not a failure). Failures are cached for 600 s (`failureMaxAge`, the exception above), so
+  an outage isn't re-requested by every visitor. Don't fetch whole groups.
 
 ## Commands
 - `npm run dev` — local dashboard at http://localhost:5173 (uses `scripts/dev.mjs`, see TASKS.md)

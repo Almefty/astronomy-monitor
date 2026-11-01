@@ -22,6 +22,7 @@ import {
   ecfToEci, ecfToLookAngles, eciToEcf, geodeticToEcf, gstime, json2satrec, propagate, SatRecError,
   type EcfVec3, type GeodeticLocation, type SatRec,
 } from "satellite.js";
+import { addDaysIso } from "../../shared/apod";
 import type { SatelliteElements } from "../../shared/contract";
 import type { Vec3 } from "../../shared/orbit";
 import {
@@ -39,7 +40,10 @@ const EARTH_RADIUS_KM = 6378.137;
 export const MIN_ALTITUDE = 10;
 /** The observer's Sun must be below this altitude (degrees) for a pass to be visible. */
 export const MAX_SUN_ALTITUDE = TWILIGHT.civil;
-/** Search step, ms. A pass above 10° lasts at least ~1 min for these orbits, so none is missed. */
+/**
+ * Scan step, ms. Visible pieces shorter than this (eclipsed near the 10° edge, grazing passes) are
+ * found by searching between samples (`hiddenBetween`, `grazingPeak`).
+ */
 export const STEP_MS = 20_000;
 /** Edge times are refined to this, ms. */
 const EDGE_TOL_MS = 500;
@@ -137,13 +141,9 @@ export function darkIntervals(obs: Observer, start: number, end: number, limit =
   return out;
 }
 
-function addDays(date: string, n: number): string {
-  return new Date(Date.parse(`${date}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
-}
-
 /** From `now` to the end of the observer's `nights`-th night (tonight counts as the first), UTC ms. */
 export function passSearchWindow(now: number, obs: Observer, nights = 4): [number, number] {
-  return [now, nightWindow(addDays(nightDate(now, obs), nights - 1), obs)[1]];
+  return [now, nightWindow(addDaysIso(nightDate(now, obs), nights - 1), obs)[1]];
 }
 
 /* ------------------------------------------------------------------ */
@@ -169,6 +169,10 @@ interface Context {
   reachDeg: number;
   /** Upper bound on how fast that central angle can change, degrees per ms. */
   rateDegPerMs: number;
+  /** Scan step, ms (STEP_MS; tests use other steps). */
+  stepMs: number;
+  /** First time SGP4 failed during this search (decayed or invalid elements), else null. */
+  failedAt: number | null;
 }
 
 /** Earth's gravitational parameter, km³/s², and rotation rate, rad/s. */
@@ -180,7 +184,7 @@ const EARTH_ROTATION = 7.2921159e-5;
  * θ between the observer and the satellite is at most acos(R·cos 10° / r) − 10° (a sphere of the
  * polar radius and the orbit's apogee radius make it generous), and θ changes no faster than the
  * satellite's fastest angular motion plus the Earth's rotation. So while θ exceeds that reach, no
- * pass can start for (θ − reach) / rate, and the 20-s scan jumps ahead (≈ 15× faster).
+ * pass can start for (θ − reach) / rate, and the scan jumps ahead (≈ 15× faster).
  */
 function skipBounds(satrec: SatRec): Pick<Context, "reachDeg" | "rateDegPerMs"> {
   const n = satrec.no / 60; // rad/s
@@ -192,11 +196,14 @@ function skipBounds(satrec: SatRec): Pick<Context, "reachDeg" | "rateDegPerMs"> 
   return { reachDeg: reach / DEG + 1, rateDegPerMs: ((rate * 1.05) / DEG) / 1000 };
 }
 
-/** Satellite position seen by the observer at `ms`, or null if SGP4 fails (e.g. decayed). */
+/** Satellite position seen by the observer at `ms`, or null if SGP4 fails (recorded in `ctx.failedAt`). */
 function stateAt(ctx: Context, ms: number): State | null {
   const date = new Date(ms);
   const pv = propagate(ctx.satrec, date, { communityDecayCheckEnabled: true });
-  if (!pv) return null;
+  if (!pv) {
+    if (ctx.failedAt === null || ms < ctx.failedAt) ctx.failedAt = ms;
+    return null;
+  }
   const p = pv.position;
   const gmst = gstime(date);
   const look = ecfToLookAngles(ctx.site, eciToEcf(p, gmst));
@@ -218,17 +225,59 @@ function stateAt(ctx: Context, ms: number): State | null {
 }
 
 const isVisible = (ctx: Context, s: State | null): s is State => !!s && s.alt >= MIN_ALTITUDE && (s.sunlit || !ctx.requireSunlit);
+const isUp = (s: State | null): boolean => !!s && s.alt >= MIN_ALTITUDE;
 
-/** The visibility edge between `lo` (not visible) and `hi` (visible), either order in time. */
-function refineEdge(ctx: Context, lo: State | null, loMs: number, hi: State): { state: State; cause: PassEdgeCause } {
-  let a = loMs, b = hi.ms, sa = lo, sb = hi;
+type Edge = { state: State; cause: PassEdgeCause };
+
+/**
+ * Bisect between a sample where `inside` is false (`out`, at `outMs`; null if SGP4 failed there) and one
+ * where it is true (`inn`), either order in time, to 0.5 s. Returns the last states on each side.
+ */
+function bisect(ctx: Context, out: State | null, outMs: number, inn: State, inside: (s: State | null) => s is State): { inner: State; outer: State | null } {
+  let a = outMs, b = inn.ms, sa = out, sb = inn;
   while (Math.abs(b - a) > EDGE_TOL_MS) {
     const mid = (a + b) / 2, sm = stateAt(ctx, mid);
-    if (isVisible(ctx, sm)) [b, sb] = [mid, sm];
+    if (inside(sm)) [b, sb] = [mid, sm];
     else [a, sa] = [mid, sm];
   }
-  const cause: PassEdgeCause = sa && sa.alt >= MIN_ALTITUDE && !sa.sunlit ? "shadow" : "horizon";
-  return { state: sb, cause };
+  return { inner: sb, outer: sa };
+}
+
+/** The visibility edge between `lo` (not visible) and `hi` (visible), either order in time. */
+function refineEdge(ctx: Context, lo: State | null, loMs: number, hi: State): Edge {
+  const { inner, outer } = bisect(ctx, lo, loMs, hi, (s): s is State => isVisible(ctx, s));
+  return { state: inner, cause: outer && outer.alt >= MIN_ALTITUDE && !outer.sunlit ? "shadow" : "horizon" };
+}
+
+/**
+ * A visible piece shorter than the scan step between two consecutive samples that are both not
+ * visible: one below 10° and the other above 10° but in the Earth's shadow. Between them the satellite
+ * crosses 10° once and the shadow boundary at most once, so if it is sunlit where it crosses 10°, it is
+ * visible from there to the shadow boundary (rises lit and is eclipsed within the step, or leaves the
+ * shadow and sets within it).
+ */
+function hiddenBetween(ctx: Context, a: State, b: State): [Edge, Edge] | null {
+  if (isUp(a) === isUp(b)) return null;
+  const [low, high] = isUp(a) ? [b, a] : [a, b];
+  const cross = bisect(ctx, low, low.ms, high, (x): x is State => isUp(x)).inner;
+  if (!isVisible(ctx, cross)) return null;
+  const horizon: Edge = { state: cross, cause: "horizon" };
+  const shadow = refineEdge(ctx, high, high.ms, cross);
+  return isUp(a) ? [shadow, horizon] : [horizon, shadow];
+}
+
+/**
+ * A pass that peaks above 10° between three consecutive samples that are all below it (a grazing pass
+ * above 10° for less than the step): the middle sample is a local maximum, so the peak is within one
+ * step of it.
+ */
+function grazingPeak(ctx: Context, l: State, m: State, r: State): [Edge, Edge] | null {
+  if (isUp(l) || isUp(m) || isUp(r) || m.alt <= 0 || m.alt < l.alt || m.alt < r.alt) return null;
+  const peak = refinePeak(ctx, Math.max(l.ms, m.ms - ctx.stepMs), Math.min(r.ms, m.ms + ctx.stepMs), m);
+  if (!isUp(peak)) return null;
+  if (isVisible(ctx, peak)) return [refineEdge(ctx, l, l.ms, peak), refineEdge(ctx, r, r.ms, peak)];
+  // Above 10° but eclipsed at its peak: a lit piece can still sit on either side.
+  return hiddenBetween(ctx, l, peak) ?? hiddenBetween(ctx, peak, r);
 }
 
 /** Highest point between `a` and `b` (golden-section search; altitude is unimodal over a pass). */
@@ -243,13 +292,14 @@ function refinePeak(ctx: Context, a: number, b: number, best: State): State {
       a = x1; x1 = x2; s1 = s2; x2 = a + g * (b - a); s2 = stateAt(ctx, x2);
     }
   }
-  const c = [best, s1, s2].filter((s): s is State => !!s);
-  return c.reduce((m, s) => (s.alt > m.alt ? s : m));
+  const c = [best, s1, s2].filter((s): s is State => !!s && s.ms >= a - 1 && s.ms <= b + 1);
+  return (c.length ? c : [best]).reduce((m, s) => (s.alt > m.alt ? s : m));
 }
 
-function buildPass(sat: SatelliteElements, run: State[], start: { state: State; cause: PassEdgeCause }, end: { state: State; cause: PassEdgeCause }, ctx: Context): VisiblePass {
-  const best = run.reduce((m, s) => (s.alt > m.alt ? s : m));
-  const peak = refinePeak(ctx, Math.max(start.state.ms, best.ms - STEP_MS), Math.min(end.state.ms, best.ms + STEP_MS), best);
+function buildPass(sat: SatelliteElements, run: State[], start: Edge, end: Edge, ctx: Context): VisiblePass {
+  const best = [start.state, ...run, end.state].reduce((m, s) => (s.alt > m.alt ? s : m));
+  const lo = Math.max(start.state.ms, best.ms - ctx.stepMs), hi = Math.min(end.state.ms, best.ms + ctx.stepMs);
+  const peak = refinePeak(ctx, lo, hi, best);
   const all = [start.state, ...run, peak, end.state]
     .filter((s, i, arr) => s.ms >= start.state.ms && s.ms <= end.state.ms && arr.findIndex((o) => o.ms === s.ms) === i)
     .sort((x, y) => x.ms - y.ms);
@@ -265,14 +315,15 @@ function buildPass(sat: SatelliteElements, run: State[], start: { state: State; 
   };
 }
 
-/** Visible passes of one satellite inside the given dark intervals. */
+/** Visible passes of one satellite inside the given dark intervals, in time order. */
 function passesFor(sat: SatelliteElements, ctx: Context, dark: [number, number][], windowStart: number, windowEnd: number): VisiblePass[] {
   const out: VisiblePass[] = [];
   for (const [a, b] of dark) {
+    let prev2: State | null = null; // the sample before `prev`
     let prev: State | null = null;
     let prevMs = a;
     let run: State[] = [];
-    let start: { state: State; cause: PassEdgeCause } | null = null;
+    let start: Edge | null = null;
     for (let t = a; ; ) {
       const s = stateAt(ctx, t);
       const vis = isVisible(ctx, s);
@@ -284,19 +335,25 @@ function passesFor(sat: SatelliteElements, ctx: Context, dark: [number, number][
         out.push(buildPass(sat, run, start, refineEdge(ctx, s, t, prev), ctx));
         start = null;
         run = [];
+      } else if (!vis && !start && s && prev && !isVisible(ctx, prev)) {
+        // Neither sample is visible, but a piece shorter than the step may lie between them.
+        const piece = hiddenBetween(ctx, prev, s) ?? (prev2 && !isVisible(ctx, prev2) ? grazingPeak(ctx, prev2, prev, s) : null);
+        if (piece) out.push(buildPass(sat, [], piece[0], piece[1], ctx));
       }
       if (t >= b) {
         if (start && vis) out.push(buildPass(sat, run, start, { state: s, cause: b === windowEnd ? "window" : "twilight" }, ctx));
         break;
       }
+      prev2 = prev;
       prev = s;
       prevMs = t;
-      // Far from the observer, jump ahead as far as no pass can start (see skipBounds).
+      // Far from the observer, jump ahead as far as no pass can start (see skipBounds). Pieces between
+      // samples aren't missed: right after a jump the satellite is still out of reach.
       const skip = !start && s ? (s.centralAngle - ctx.reachDeg) / ctx.rateDegPerMs : 0;
-      t = Math.min(t + Math.max(STEP_MS, skip), b);
+      t = Math.min(t + Math.max(ctx.stepMs, skip), b);
     }
   }
-  return out;
+  return out.sort((x, y) => x.start.ms - y.start.ms);
 }
 
 function siteOf(obs: Observer): Pick<Context, "site" | "siteEcf"> {
@@ -313,13 +370,18 @@ function satrecOf(sat: SatelliteElements): SatRec | string {
   }
 }
 
+function contextFor(sat: SatelliteElements, satrec: SatRec, obs: Observer, requireSunlit: boolean, stepMs: number, skipAhead = true): Context {
+  const bounds = skipAhead ? skipBounds(satrec) : { reachDeg: 180, rateDegPerMs: 1 };
+  return { satrec, stdMag: sat.stdMag, ...siteOf(obs), ...bounds, requireSunlit, stepMs, failedAt: null };
+}
+
 /**
  * Visible passes of each satellite between `start` and `end` (UTC ms) for an observer. Satellites
- * fail independently: one with bad or very old elements gets an `error` and no passes.
+ * fail independently: one with bad or very old elements, or whose orbit SGP4 can't propagate over the
+ * search (decayed), gets an `error` and no passes. `stepMs` is for tests.
  */
-export function predictPasses(sats: readonly SatelliteElements[], obs: Observer, start: number, end: number): PassPrediction {
+export function predictPasses(sats: readonly SatelliteElements[], obs: Observer, start: number, end: number, { stepMs = STEP_MS } = {}): PassPrediction {
   const dark = darkIntervals(obs, start, end);
-  const site = siteOf(obs);
   const satellites: SatellitePasses[] = sats.map((sat) => {
     const ageDays = (start - Date.parse(sat.epoch)) / DAY;
     const base = { id: sat.id, name: sat.name, ageDays };
@@ -328,9 +390,14 @@ export function predictPasses(sats: readonly SatelliteElements[], obs: Observer,
     }
     const satrec = satrecOf(sat);
     if (typeof satrec === "string") return { ...base, passes: [], error: satrec };
-    const passes = passesFor(sat, { satrec, stdMag: sat.stdMag, ...site, ...skipBounds(satrec), requireSunlit: true }, dark, start, end);
-    const failed = satrec.error !== SatRecError.None;
-    return { ...base, passes: failed ? [] : passes, error: failed ? "Its orbit couldn’t be propagated over these dates (SGP4 error or decayed)." : null };
+    const ctx = contextFor(sat, satrec, obs, true, stepMs);
+    const passes = passesFor(sat, ctx, dark, start, end);
+    // SGP4 failed somewhere in the search (recorded by stateAt): positions near there are garbage, so
+    // nothing from this satellite is trusted.
+    if (ctx.failedAt !== null) {
+      return { ...base, passes: [], error: `Its orbit couldn’t be propagated from ${new Date(ctx.failedAt).toISOString().slice(0, 16).replace("T", " ")} UTC on (SGP4 error, or it has decayed).` };
+    }
+    return { ...base, passes, error: null };
   });
   const passes = satellites.flatMap((s) => s.passes).sort((x, y) => x.start.ms - y.start.ms);
   return { satellites, passes };
@@ -338,19 +405,21 @@ export function predictPasses(sats: readonly SatelliteElements[], obs: Observer,
 
 /**
  * Every pass above 10° between `start` and `end`, day or night, lit or not (for checks against
- * ephemerides). `skipAhead: false` scans every 20 s (to test the skipping).
+ * ephemerides). `skipAhead: false` scans every step without jumping (to test the skipping).
  */
-export function passesAboveHorizon(sat: SatelliteElements, obs: Observer, start: number, end: number, { skipAhead = true } = {}): VisiblePass[] {
+export function passesAboveHorizon(sat: SatelliteElements, obs: Observer, start: number, end: number, { skipAhead = true, stepMs = STEP_MS } = {}): VisiblePass[] {
   const satrec = satrecOf(sat);
   if (typeof satrec === "string") throw new Error(satrec);
-  const bounds = skipAhead ? skipBounds(satrec) : { reachDeg: 180, rateDegPerMs: 1 };
-  return passesFor(sat, { satrec, stdMag: sat.stdMag, ...siteOf(obs), ...bounds, requireSunlit: false }, [[start, end]], start, end);
+  const ctx = contextFor(sat, satrec, obs, false, stepMs, skipAhead);
+  const passes = passesFor(sat, ctx, [[start, end]], start, end);
+  if (ctx.failedAt !== null) throw new Error(`SGP4 failed at ${new Date(ctx.failedAt).toISOString()}`);
+  return passes;
 }
 
 /** Where a satellite is in the observer's sky at `ms` (null if SGP4 fails), with its estimated magnitude. */
 export function satellitePosition(sat: SatelliteElements, obs: Observer, ms: number): (PassPoint & { rangeKm: number; sunlit: boolean; mag: number }) | null {
   const satrec = satrecOf(sat);
   if (typeof satrec === "string") return null;
-  const s = stateAt({ satrec, stdMag: sat.stdMag, ...siteOf(obs), ...skipBounds(satrec), requireSunlit: true }, ms);
+  const s = stateAt(contextFor(sat, satrec, obs, true, STEP_MS), ms);
   return s && { ms: s.ms, alt: s.alt, az: s.az, rangeKm: s.rangeKm, sunlit: s.sunlit, mag: s.mag };
 }

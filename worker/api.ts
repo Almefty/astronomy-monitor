@@ -37,7 +37,11 @@ export function json(body: unknown, status = 200, maxAge = 0, extra: Record<stri
   return new Response(JSON.stringify(body), { status, headers: { ...BASE_HEADERS, "cache-control": cacheControl(maxAge, browserMaxAge), ...extra } });
 }
 
-function errorResponse(source: string, err: unknown, upstream: Upstream): Response {
+/**
+ * An error answer. `failureMaxAge` (> 0 only for sources that declare `failureMaxAge`) caches upstream
+ * failures briefly; internal errors and bad requests are never cached.
+ */
+function errorResponse(source: string, err: unknown, upstream: Upstream, failureMaxAge = 0): Response {
   const known = err instanceof SourceError ? err : null;
   // Log only the message (never env or full request) so secrets cannot leak into logs.
   console.warn(`[${source}] ${known ? known.kind : "internal"}: ${known ? known.message : String((err as Error)?.message ?? err)}`);
@@ -49,7 +53,8 @@ function errorResponse(source: string, err: unknown, upstream: Upstream): Respon
       : { kind: "internal", message: "Unexpected error while preparing this panel's data." },
     upstream: upstream.calls,
   };
-  return json(body, known?.status ?? 500);
+  const upstreamFailure = known !== null && known.kind !== "bad-request" && known.kind !== "internal";
+  return json(body, known?.status ?? 500, upstreamFailure ? failureMaxAge : 0);
 }
 
 /**
@@ -121,10 +126,16 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     });
     const body: Envelope<unknown> = { source: source.id, fetchedAt: new Date().toISOString(), data, upstream: upstream.calls, notices };
     // A partial failure (a failed upstream call, a warning) is served but not cached, so the next
-    // request tries again instead of everyone seeing the degraded result for the full lifetime.
-    const degraded = !cacheable || upstream.calls.some((c) => !c.ok) || notices.some((n) => n.level === "warning");
-    return json(body, 200, degraded ? 0 : maxAge, {}, source.browserMaxAge ?? maxAge);
+    // request tries again instead of everyone seeing the degraded result for the full lifetime —
+    // except for sources with a `failureMaxAge` (see SourceModule), which cache it briefly.
+    if (!cacheable) return json(body, 200, 0);
+    const degraded = upstream.calls.some((c) => !c.ok) || notices.some((n) => n.level === "warning");
+    if (degraded) {
+      const age = Math.min(source.failureMaxAge ?? 0, maxAge);
+      return json(body, 200, age, {}, age);
+    }
+    return json(body, 200, maxAge, {}, source.browserMaxAge ?? maxAge);
   } catch (err) {
-    return errorResponse(source.id, err, upstream);
+    return errorResponse(source.id, err, upstream, Math.min(source.failureMaxAge ?? 0, maxAge));
   }
 }

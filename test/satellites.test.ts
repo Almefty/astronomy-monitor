@@ -8,7 +8,8 @@ import {
 } from "../src/viz/passes";
 import { canonicalApiPath, handleApi } from "../worker/api";
 import type { Env } from "../worker/lib/env";
-import { ommEpochMs, SATELLITE_LIST, slimOmm, STALE_AFTER_DAYS } from "../worker/sources/satellites";
+import { SOURCES } from "../worker/sources/index";
+import { FAILURE_MAX_AGE, ommEpochMs, SATELLITE_LIST, slimOmm, STALE_AFTER_DAYS } from "../worker/sources/satellites";
 import ref from "./fixtures/satellites-reference.json";
 import vallado from "./fixtures/sgp4-vallado.json";
 
@@ -109,36 +110,67 @@ describe("CelesTrak elements (Worker)", () => {
     expect(canonicalApiPath(new URL("https://example.test/api/sources/satellites?lat=1&x=2"))).toBe("/api/sources/satellites");
   });
 
-  it("stops at the first error, as CelesTrak's usage policy asks, and doesn't cache it", async () => {
+  // Deliberate exception to "no-store for errors" (CLAUDE.md): CelesTrak asks clients to stop after
+  // errors, so failed and partial answers are cached for FAILURE_MAX_AGE instead of being re-requested.
+  it("stops at the first error, as CelesTrak's usage policy asks, and caches the failure briefly", async () => {
+    expect(FAILURE_MAX_AGE).toBe(600);
     const asked = stub({ 25544: () => new Response("Service Unavailable", { status: 503 }) });
     const res = await get();
     expect(res.status).toBe(502);
-    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("cache-control")).toBe("public, max-age=600");
     expect(asked).toEqual([25544]);
   });
 
-  it("serves what loaded before an error, with a warning, uncached", async () => {
-    const asked = stub({ 48274: () => new Response("No GP data found", { status: 404 }) });
+  it("serves what loaded before an error with a warning, cached briefly", async () => {
+    const asked = stub({ 48274: () => new Response("Forbidden", { status: 403 }) });
     const res = await get();
     expect(res.status).toBe(200);
-    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("cache-control")).toBe("public, max-age=600");
     const body = (await res.json()) as Envelope<SatellitesData>;
     expect(asked).toEqual([25544, 48274]);
     expect(body.data.satellites.map((s) => s.name)).toEqual(["ISS"]);
     expect(body.data.unavailable.map((u) => [u.name, u.reason])).toEqual([
-      ["Tiangong", "CelesTrak has no current elements for it."],
+      ["Tiangong", expect.stringContaining("HTTP 403")],
       ["Hubble", "Not requested after an earlier CelesTrak error."],
     ]);
     expect(body.notices).toEqual([{ level: "warning", text: expect.stringContaining("Tiangong and Hubble") }]);
   });
 
-  it("skips an answer that isn't an element set (HTTP 200 with a text message) and carries on", async () => {
+  it("treats “No GP data found” as an answer about one object: the others load and the cache lifetime stays", async () => {
+    const asked = stub({ 48274: () => new Response("No GP data found", { status: 404, headers: { "content-type": "text/plain" } }) });
+    const res = await get();
+    expect(res.headers.get("cache-control")).toBe("public, max-age=7200");
+    const body = (await res.json()) as Envelope<SatellitesData>;
+    expect(asked).toEqual([25544, 48274, 20580]);
+    expect(body.data.satellites.map((s) => s.name)).toEqual(["ISS", "Hubble"]);
+    expect(body.data.unavailable).toEqual([{ id: 48274, name: "Tiangong", reason: "CelesTrak has no current elements for it." }]);
+    expect(body.notices).toEqual([{ level: "info", text: expect.stringContaining("no usable orbital elements for Tiangong") }]);
+  });
+
+  it("stops at any other HTTP 404", async () => {
+    const asked = stub({ 48274: () => new Response("Not Found", { status: 404 }) });
+    const res = await get();
+    expect(res.headers.get("cache-control")).toBe("public, max-age=600");
+    expect(asked).toEqual([25544, 48274]);
+  });
+
+  it("treats an answer that isn't an element set (HTTP 200 with a text message) like missing elements", async () => {
     const asked = stub({ 20580: () => new Response('Invalid query: "CATNR=x"', { status: 200 }) });
     const res = await get();
     const body = (await res.json()) as Envelope<SatellitesData>;
     expect(asked).toEqual([25544, 48274, 20580]);
-    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.get("cache-control")).toBe("public, max-age=7200");
     expect(body.data.unavailable).toEqual([{ id: 20580, name: "Hubble", reason: expect.stringContaining("Invalid query") }]);
+    expect(body.notices.map((n) => n.level)).toEqual(["info"]);
+  });
+
+  it("caches a total failure briefly too, but no other source's errors", async () => {
+    stub({ 25544: () => new Response("No GP data found", { status: 404 }), 48274: () => new Response("No GP data found", { status: 404 }), 20580: () => new Response("No GP data found", { status: 404 }) });
+    const res = await get();
+    expect(res.status).toBe(502);
+    expect(res.headers.get("cache-control")).toBe("public, max-age=600");
+    // The exception is CelesTrak's alone.
+    expect(Object.values(SOURCES).filter((x) => x.failureMaxAge !== undefined).map((x) => x.id)).toEqual(["satellites"]);
   });
 
   it("flags stale elements without making the answer uncacheable", async () => {
@@ -369,6 +401,37 @@ describe("visibility", () => {
     expect(total).toBeGreaterThan(10); // measured 15
   });
 
+  it("finds visible pieces shorter than the scan step (eclipsed near 10°, grazing)", () => {
+    // With a 2-minute step, many visible pieces fall between two samples that are both not visible
+    // (below 10°, or above 10° but eclipsed). They must still be found, matching a 5-s scan.
+    let short = 0, compared = 0;
+    for (const [name, site] of Object.entries(SITES)) {
+      const [start, end] = passSearchWindow(H_START, site, 4);
+      const fine = predictPasses(SATS, site, start, end, { stepMs: 5_000 }).passes;
+      const coarse = predictPasses(SATS, site, start, end, { stepMs: 120_000 }).passes;
+      expect(coarse.map((p) => p.name), name).toEqual(fine.map((p) => p.name));
+      for (const [i, p] of coarse.entries()) {
+        const f = fine[i]!;
+        expect(Math.abs(p.start.ms - f.start.ms), `${name} ${p.name} start`).toBeLessThan(1500);
+        expect(Math.abs(p.end.ms - f.end.ms), `${name} ${p.name} end`).toBeLessThan(1500);
+        expect(p.start.cause).toBe(f.start.cause);
+        expect(p.end.cause).toBe(f.end.cause);
+        expect(Math.abs(p.peak.alt - f.peak.alt)).toBeLessThan(0.1); // a peak at an eclipse edge moves with the 0.5-s edge tolerance
+        if (f.end.ms - f.start.ms < 120_000) short++;
+        compared++;
+      }
+      // Grazing passes above 10° for less than the step, day or night.
+      for (const sat of SATS) {
+        const all = passesAboveHorizon(sat, site, H_START, H_END, { stepMs: 5_000 });
+        const sparse = passesAboveHorizon(sat, site, H_START, H_END, { stepMs: 120_000 });
+        expect(sparse.length, `${sat.name} at ${name}`).toBe(all.length);
+        short += all.filter((p) => p.end.ms - p.start.ms < 120_000).length;
+      }
+    }
+    expect(compared).toBeGreaterThan(10);
+    expect(short).toBeGreaterThan(3); // the test exercises pieces shorter than the coarse step
+  });
+
   it("isolates a satellite with unusable or old elements", () => {
     const site = SITES.capetown!;
     const [start, end] = passSearchWindow(H_START, site, 4);
@@ -380,6 +443,18 @@ describe("visibility", () => {
     expect(result.satellites[2]!.error).toMatch(/40 days/);
     expect(result.satellites[2]!.ageDays).toBeCloseTo(40, 6);
     expect(result.passes.every((p) => p.satId === ISS.id)).toBe(true);
+  });
+
+  it("reports an SGP4 failure during the search (decay) instead of passes", () => {
+    const site = SITES.london!;
+    const [start, end] = passSearchWindow(H_START, site, 4);
+    // A very low, high-drag orbit: SGP4 gives up about 29 h after the epoch, inside the search.
+    const decaying = { ...ISS, omm: { ...ISS.omm, MEAN_MOTION: 16.2, BSTAR: 0.01, MEAN_MOTION_DOT: 0.01 } };
+    const result = predictPasses([decaying, SATS[1]!], site, start, end);
+    expect(result.satellites[0]!.passes).toEqual([]);
+    expect(result.satellites[0]!.error).toMatch(/couldn’t be propagated from 2026-11-0\d \d\d:\d\d UTC/);
+    expect(result.satellites[1]!.error).toBeNull();
+    expect(() => passesAboveHorizon(decaying, site, start, end)).toThrow(/SGP4 failed/);
   });
 
   it("searches from now to the end of the fourth night, fast", () => {
@@ -400,10 +475,44 @@ describe("visibility", () => {
 });
 
 describe("bundle", () => {
-  it("imports satellite.js only from src/viz/passes.ts (the panel loads that with import())", () => {
-    const sources = import.meta.glob<string>(["../src/**/*.ts", "../shared/**/*.ts", "../worker/**/*.ts"], { query: "?raw", import: "default", eager: true });
+  /** Imports satellite.js or one of its subpaths, statically, by re-export, or with import()/require(). */
+  const SATELLITE_JS = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)["']satellite\.js(?:\/[^"']*)?["']/;
+  /** Static import/export statements (not `import type`) with their module specifiers. */
+  const STATIC = /^\s*(?:import|export)\s+(?!type\s)(?:[^;'"]*?\sfrom\s*)?["']([^"']+)["']/gm;
+
+  /** "../src/panels/sky.ts" + "../viz/passes" → "src/viz/passes". */
+  function resolve(file: string, spec: string): string {
+    const parts = file.replace(/^\.\.\//, "").split("/").slice(0, -1);
+    for (const seg of spec.split("/")) {
+      if (seg === "..") parts.pop();
+      else if (seg !== ".") parts.push(seg);
+    }
+    return parts.join("/").replace(/\.(ts|js)$/, "");
+  }
+  const staticImportsOfPasses = (file: string, text: string) =>
+    [...text.matchAll(STATIC)].filter((m) => m[1]!.startsWith(".") && resolve(file, m[1]!) === "src/viz/passes");
+
+  it("recognizes the import forms it guards against", () => {
+    for (const ok of ['import { sgp4 } from "satellite.js";', "const m = await import('satellite.js');", 'export * from "satellite.js/dist/io.js";', 'import "satellite.js";']) {
+      expect(SATELLITE_JS.test(ok), ok).toBe(true);
+    }
+    expect(SATELLITE_JS.test('import x from "satellite.json";')).toBe(false);
+    const panel = "../src/panels/sky.ts";
+    expect(staticImportsOfPasses(panel, 'import { predictPasses } from "../viz/passes";')).toHaveLength(1);
+    expect(staticImportsOfPasses(panel, 'import "../viz/passes.ts";')).toHaveLength(1);
+    expect(staticImportsOfPasses(panel, 'export { predictPasses } from "../viz/passes";')).toHaveLength(1);
+    expect(staticImportsOfPasses(panel, 'import {\n  type VisiblePass,\n} from "../viz/passes";')).toHaveLength(1); // kept by verbatimModuleSyntax
+    expect(staticImportsOfPasses(panel, 'import type { VisiblePass } from "../viz/passes";')).toHaveLength(0);
+    expect(staticImportsOfPasses(panel, 'const m = await import("../viz/passes");')).toHaveLength(0);
+    expect(staticImportsOfPasses("../src/viz/other.ts", 'import { x } from "./passes";')).toHaveLength(1);
+  });
+
+  it("keeps satellite.js in src/viz/passes.ts, loaded only with import()", () => {
+    const sources = import.meta.glob<string>(["../src/**/*.{ts,js}", "../shared/**/*.{ts,js}", "../worker/**/*.{ts,js}"], { query: "?raw", import: "default", eager: true });
     expect(Object.keys(sources).length).toBeGreaterThan(30);
-    const importers = Object.entries(sources).filter(([, text]) => /from\s+["']satellite\.js["']/.test(text)).map(([path]) => path.replace(/^\.\.\//, ""));
+    const importers = Object.entries(sources).filter(([, text]) => SATELLITE_JS.test(text)).map(([path]) => path.replace(/^\.\.\//, ""));
     expect(importers).toEqual(["src/viz/passes.ts"]);
+    const staticUsers = Object.entries(sources).filter(([path, text]) => staticImportsOfPasses(path, text).length).map(([path]) => path);
+    expect(staticUsers).toEqual([]);
   });
 });

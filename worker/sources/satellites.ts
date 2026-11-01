@@ -28,6 +28,16 @@ export const STALE_AFTER_DAYS = 7;
  * answers repeats for this long, so each data centre asks at most once per update.
  */
 const MAX_AGE = 2 * 3600;
+/**
+ * Failed or partial answers (an HTTP error, a timeout) are cached for 10 minutes instead of not at all.
+ * This is a deliberate exception to CLAUDE.md's "no-store for errors and partial failures": CelesTrak
+ * asks clients to stop querying after a non-200 answer and firewalls those that don't, so an outage
+ * must not turn every visitor's refresh into another request. Ten minutes keeps a fix from waiting long.
+ */
+export const FAILURE_MAX_AGE = 600;
+
+/** CelesTrak's body for a catalog number without current GP data (sent with HTTP 404). */
+const NO_DATA = /^\s*No GP data found/i;
 
 const NUMERIC_FIELDS = [
   "NORAD_CAT_ID", "MEAN_MOTION", "ECCENTRICITY", "INCLINATION", "RA_OF_ASC_NODE", "ARG_OF_PERICENTER",
@@ -88,15 +98,20 @@ export const satellitesSource: SourceModule<"satellites"> = {
   provider: "CelesTrak · GP orbital data (US Space Force, via Space-Track.org)",
   docsUrl: "https://celestrak.org/NORAD/documentation/gp-data-formats.php",
   maxAge: MAX_AGE,
+  failureMaxAge: FAILURE_MAX_AGE,
 
   async load({ upstream, now, notices }) {
     const satellites: SatelliteElements[] = [];
     const unavailable: SatellitesData["unavailable"] = [];
+    /** Objects CelesTrak answered for without usable elements (the same until its next update). */
+    const missing: string[] = [];
     let firstError: SourceError | null = null;
 
     // CATNR takes one catalog number per query (a list is rejected), so one small call per object
-    // (~420 bytes each). They run one after another: CelesTrak asks clients to stop at the first
-    // non-200 answer (it may mean overload or a block), so a failure skips the remaining calls.
+    // (~420 bytes each), one after another. CelesTrak asks clients to stop at the first non-200 answer
+    // (it may mean overload or a block), so a failure skips the remaining calls. The one exception is
+    // its documented "No GP data found" (HTTP 404) for an object it has no elements for: that is an
+    // answer about that object, not a failure, so the others are still asked for.
     for (const sat of SATELLITE_LIST) {
       if (firstError) {
         unavailable.push({ id: sat.id, name: sat.name, reason: "Not requested after an earlier CelesTrak error." });
@@ -105,10 +120,17 @@ export const satellitesSource: SourceModule<"satellites"> = {
       const url = `${GP}?CATNR=${sat.id}&FORMAT=JSON`;
       let text: string;
       try {
-        text = await upstream.text(`CelesTrak GP elements (${sat.name})`, url);
+        const res = await upstream.fetch(`CelesTrak GP elements (${sat.name})`, url, { acceptStatus: [404] });
+        text = await res.text();
+        if (res.status === 404) {
+          if (!NO_DATA.test(text)) throw new SourceError("upstream", `CelesTrak GP elements (${sat.name}) answered HTTP 404: ${text.slice(0, 120).trim()}`);
+          unavailable.push({ id: sat.id, name: sat.name, reason: "CelesTrak has no current elements for it." });
+          missing.push(sat.name);
+          continue;
+        }
       } catch (err) {
         firstError = err instanceof SourceError ? err : new SourceError("upstream", String((err as Error)?.message ?? err));
-        unavailable.push({ id: sat.id, name: sat.name, reason: /HTTP 404/.test(firstError.message) ? "CelesTrak has no current elements for it." : firstError.message });
+        unavailable.push({ id: sat.id, name: sat.name, reason: firstError.message });
         continue;
       }
       let json: unknown = null;
@@ -120,22 +142,32 @@ export const satellitesSource: SourceModule<"satellites"> = {
       const omm = slimOmm(json, sat.id);
       if (!omm) {
         unavailable.push({ id: sat.id, name: sat.name, reason: `CelesTrak's answer had no usable elements (starts with "${text.slice(0, 60).trim()}").` });
+        missing.push(sat.name);
         continue;
       }
       satellites.push({ id: sat.id, name: sat.name, stdMag: sat.stdMag, epoch: new Date(ommEpochMs(omm.EPOCH)!).toISOString(), omm });
     }
 
     if (!satellites.length) {
+      // Cached for FAILURE_MAX_AGE (see above), so an outage isn't re-requested by every visitor.
       throw firstError ?? new SourceError("parse", "CelesTrak returned no usable orbital elements.");
     }
-    if (unavailable.length) {
-      // A warning, so this partial answer isn't cached and the next refresh tries again.
-      notices.push({ level: "warning", text: `Orbital elements for ${unavailable.map((u) => u.name).join(" and ")} couldn’t be loaded from CelesTrak this time; no passes are predicted for ${unavailable.length > 1 ? "them" : "it"}.` });
+    const names = (list: string[]) => list.join(" and ");
+    if (firstError) {
+      // A warning: this partial answer is cached for FAILURE_MAX_AGE, not the full two hours.
+      const failed = unavailable.map((u) => u.name).filter((n) => !missing.includes(n));
+      notices.push({ level: "warning", text: `Orbital elements for ${names(failed)} couldn’t be loaded from CelesTrak this time; no passes are predicted for ${failed.length > 1 ? "them" : "it"}.` });
+    }
+    // An object CelesTrak answered for but has no usable elements is the same on every request until
+    // its next update, so it is "info" and the answer keeps the full cache lifetime: one persistently
+    // missing object mustn't make every visitor re-ask CelesTrak for all of them.
+    if (missing.length) {
+      notices.push({ level: "info", text: `CelesTrak has no usable orbital elements for ${names(missing)} right now; no passes are predicted for ${missing.length > 1 ? "them" : "it"}.` });
     }
 
-    // Stale elements are flagged as "info", not "warning": a warning would stop the answer from being
-    // cached, and re-downloading can't make CelesTrak's elements newer (its policy asks for one
-    // download per update). The panel also compares each epoch with the current time itself.
+    // Stale elements are flagged as "info", not "warning": a warning would cut the cache lifetime to
+    // FAILURE_MAX_AGE, and re-downloading can't make CelesTrak's elements newer (its policy asks for
+    // one download per update). The panel also compares each epoch with the current time itself.
     const stale = satellites
       .map((s) => ({ s, age: epochAgeDays(Date.parse(s.epoch), now.getTime()) }))
       .filter(({ age }) => age > STALE_AFTER_DAYS);
