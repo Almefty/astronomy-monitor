@@ -5,6 +5,7 @@ import { gcnSource } from "./gcn";
 import { goesSource } from "./goes";
 import { neoSource } from "./neo";
 import { orbitsSource } from "./orbits";
+import { satellitesSource } from "./satellites";
 import { solarSource } from "./solar";
 import { telescopeSource } from "./telescopes";
 import type { SourceModule } from "./types";
@@ -20,6 +21,7 @@ export const SOURCES: { [K in SourceId]: SourceModule<K> } = {
   telescopes: telescopeSource,
   goes: goesSource,
   orbits: orbitsSource,
+  satellites: satellitesSource,
 };
 
 export function getSource(id: string): SourceModule | undefined {

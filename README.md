@@ -55,6 +55,7 @@ All data is fetched from the public services below. None of it is redistributed 
 | [Sesame name resolver](https://cds.unistra.fr/cgi-bin/Sesame) | Target positions from catalog names | CDS, Strasbourg Astronomical Observatory, France |
 | [NASA Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/) | Exoplanets | Caltech/IPAC under contract with NASA (Exoplanet Exploration Program) |
 | [Astronomy Picture of the Day](https://apod.nasa.gov/apod/astropix.html) | Picture of the day | Robert Nemiroff and Jerry Bonnell, hosted by NASA |
+| [CelesTrak GP data](https://celestrak.org/NORAD/documentation/gp-data-formats.php) | Spacecraft orbital elements for the coming "Sky tonight" passes | Dr. T.S. Kelso, CelesTrak (data from the US Space Force via Space-Track.org) |
 
 **APOD images and videos belong to their credited authors**, and many are copyrighted. The dashboard shows them as NASA publishes them, always with the credit and copyright line, and links back to the entry. The page's own fonts are IBM Plex (SIL Open Font License), bundled via Fontsource. "View sky in Aladin" links open CDS's Aladin Lite.
 
@@ -145,7 +146,7 @@ worker/                 Cloudflare Worker = the only server code (holds the secr
   lib/upstream.ts       fetch with timeouts, typed errors, API-key redaction, call log shown in the UI
   lib/coords.ts         strict sky-coordinate parsing from circular text and from target names
   sources/*.ts          one module per data source → normalized JSON (see shared/contract.ts)
-                        (v2: gcn.ts, telescopes.ts, goes.ts; v3: orbits.ts)
+                        (v2: gcn.ts, telescopes.ts, goes.ts; v3: orbits.ts; v4: satellites.ts)
 shared/contract.ts      the JSON contract between Worker and browser
 shared/astro.ts         time, Sun position, angular separation, small circles (Worker + browser)
 shared/apod.ts          APOD calendar: archive start, weeks, nearest/random day (Worker + browser)
@@ -158,6 +159,7 @@ src/                    browser app (TypeScript + D3 scales, no framework)
   viz/                  shared chart pieces (axes, hover layer, label placement, tooltip, sky projection)
   viz/orrery-model.ts   v3: positions, distances and accuracy checks for the 3D panel (no three.js)
   viz/orrery3d.ts       v3: the three.js scene (lazy chunk; the only file that imports three)
+  viz/passes.ts         v4: spacecraft passes via SGP4 (lazy chunk; the only file that imports satellite.js)
   styles/               design tokens (light + dark) and layout
 public/_headers         security headers (Content-Security-Policy etc.) for the deployed site
 test/                   unit tests for the Worker normalizers (incl. a real DONKI fixture) and the orbit
@@ -165,7 +167,7 @@ test/                   unit tests for the Worker normalizers (incl. a real DONK
 ```
 
 - **Free-plan friendly:** static files are served from Cloudflare's asset store (free); only `/api/*` runs the Worker. The 0.8 MB exoplanet catalog is streamed through without parsing, which keeps the Worker far under the free plan's 10 ms CPU limit. No database, no cron jobs, no paid services. Version 2 keeps to the same limits: the telescope panel asks for Webb and Hubble in two parallel requests (halves CPU per request; Hubble's ~200 KB timeline is only cut into columns inside the display window), the JWST schedules page is scanned with `indexOf` and abandoned after the first links, a GCN refresh stays under the 50-subrequest limit (≤ 5 list pages + ≤ 40 circulars), and live updates fetch the 6-hour X-ray file (~160 KB) and merge it into the day already shown. With one open tab, live mode costs at most ~1,500 Worker requests per day (free plan: 100,000).
-- **Caching and rate limit:** Cloudflare's Workers Cache sits in front of the API. Each response says how long it may be reused — GOES X-rays 60 s, GCN 5 min, DONKI 10 min, APOD 30 min (past APOD weeks 30 days at Cloudflare, 1 day in your browser), close approaches, asteroid orbits and telescope schedules 1 h, exoplanets 6 h — always shorter than the live-mode interval for live feeds. A repeated request within that time is answered by Cloudflare without running the Worker or calling NASA/NOAA/STScI. Errors, partial failures and sample data are never cached. The time shown on each panel is when the data was actually fetched. Per client, `/api/*` allows 120 requests a minute (a "Refresh all" is about 10); beyond that the panels keep their data and say "Too many requests". (As of 14 Oct 2026 Cloudflare doesn't enforce this limit on this free workers.dev Worker — a known issue; it works locally and will take effect once fixed.)
+- **Caching and rate limit:** Cloudflare's Workers Cache sits in front of the API. Each response says how long it may be reused — GOES X-rays 60 s, GCN 5 min, DONKI 10 min, APOD 30 min (past APOD weeks 30 days at Cloudflare, 1 day in your browser), close approaches, asteroid orbits and telescope schedules 1 h, spacecraft orbital elements 2 h (CelesTrak's update cycle, as its usage policy asks), exoplanets 6 h — always shorter than the live-mode interval for live feeds. A repeated request within that time is answered by Cloudflare without running the Worker or calling NASA/NOAA/STScI. Errors, partial failures and sample data are never cached — except CelesTrak's, which are kept for 10 minutes because its usage policy asks clients to stop querying after an error. The time shown on each panel is when the data was actually fetched. Per client, `/api/*` allows 120 requests a minute (a "Refresh all" is about 10); beyond that the panels keep their data and say "Too many requests". (As of 14 Oct 2026 Cloudflare doesn't enforce this limit on this free workers.dev Worker — a known issue; it works locally and will take effect once fixed.)
 - **Content-Security-Policy unchanged:** every upstream call goes through the Worker (`connect-src 'self'`), the sky maps are drawn locally (no external scripts or map tiles), and "View sky in Aladin" is an ordinary link that opens CDS's Aladin Lite in a new tab. Embedding Aladin Lite would have needed its script host, WebAssembly (`'wasm-unsafe-eval'`) and its image-tile servers in the CSP, so it was not embedded.
 - **Secret handling:** `NASA_API_KEY` exists only as a Worker secret (Cloudflare) or in `.dev.vars` (local, gitignored). It is never sent to the browser, never logged, and redacted (`api_key=***`) from the request log shown in each panel's "Details".
 - **Why `npm run dev` runs `scripts/dev.mjs`:** Cloudflare's local runtime (workerd) doesn't yet trust the certificate chain used by `*.jpl.nasa.gov`, so the launcher hands it Node's bundled Mozilla root certificates. Nothing is installed system-wide; production on Cloudflare doesn't need this.

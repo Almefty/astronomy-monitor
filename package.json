@@ -36,6 +36,7 @@
     "d3-scale": "^4.0.2",
     "d3-shape": "^3.2.0",
     "d3-time-format": "^4.1.0",
+    "satellite.js": "^7.1.0",
     "three": "^0.186.1"
   },
   "allowScripts": {

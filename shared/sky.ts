@@ -199,6 +199,13 @@ export function refractionFromApparent(apparent: number): number {
   return 1 / Math.tan((apparent + 7.31 / (apparent + 4.4)) * DEG) / 60;
 }
 
+const COMPASS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"] as const;
+
+/** 16-point compass direction of an azimuth (degrees from north through east): 100° → "E". */
+export function compassPoint(az: number): (typeof COMPASS)[number] {
+  return COMPASS[Math.round(norm360(az) / 22.5) % 16]!;
+}
+
 /** Altitude as seen through the standard atmosphere (for display, not for geometry). */
 export function apparentAltitude(alt: number): number {
   return alt + refraction(alt);

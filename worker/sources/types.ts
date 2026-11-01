@@ -29,6 +29,13 @@ export interface SourceModule<K extends SourceId = SourceId> extends SourceInfo 
   maxAge: number;
   /** Shorter lifetime for browsers (sent as max-age, with `maxAge` as s-maxage for Cloudflare's cache). */
   browserMaxAge?: number;
+  /**
+   * Deliberate exception to "no-store for errors and partial failures" (CLAUDE.md): cache a failed or
+   * partial answer from this source for this many seconds instead. Only for upstreams whose usage
+   * policy asks clients to stop querying after errors (CelesTrak), so a failure isn't re-requested by
+   * every visitor. `noCache()` still wins. Leave unset everywhere else.
+   */
+  failureMaxAge?: number;
   /** The query parameters load() reads; everything else is dropped from the cache key. */
   params?: ParamSpec;
   load(ctx: SourceContext): Promise<SourceDataMap[K]>;
