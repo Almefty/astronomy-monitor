@@ -25,7 +25,7 @@ its `fetchedAt` was newer than the click, so cached answers looked like failures
 It now counts requests that succeeded (a request overtaken by a newer refresh of the same panel takes that
 one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming failed panels.
 **2026-11-01 (v4, PR 1 of 3):** topocentric astronomy math for the coming "Sky tonight" panel
-(`shared/sky.ts`, no UI yet; see "Version 4 — Sky tonight" and `docs/plans/sky-tonight.md`). 125 unit tests pass.
+(`shared/sky.ts`, no UI yet; see "Version 4 — Sky tonight" and `docs/plans/sky-tonight.md`). 127 unit tests pass.
 
 # Version 4 — Sky tonight (in progress, plan in `docs/plans/sky-tonight.md`)
 
@@ -36,9 +36,9 @@ one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming
       Sun (with aberration), Moon via `moonGeocentric`, planets via `planetPosition − earthPosition` with one
       light-time iteration, Moon phase (illumination, phase angle, name, age, principal-phase times), planet
       magnitudes (Mallama & Hilton 2018) and Sun elongation, a generic crossing finder (10-min scan +
-      bisection to 1 s), rise/transit/set with `normal` / `always-up` / `never-up`, noon-to-noon night events
-      with `time` / `always-above` / `always-below` / `none`, `Intl` time-zone helpers, preset places, 0.01°
-      rounding. `shared/astro.ts` `sunPosition` untouched (the telescope panel uses it).
+      bisection to 1 s), rise/transit/set with `normal` / `always-up` / `never-up`, night events from the
+      observer's solar noon to the next (`nightWindow`, `nightDate`) with `time` / `always-above` /
+      `always-below` / `none`, `Intl` time-zone helpers (display only), preset places, 0.01° rounding. `shared/astro.ts` `sunPosition` untouched (the telescope panel uses it).
 - [x] Sources verified live (2026-11-01): JPL Horizons API observer tables (`EPHEM_TYPE`, not
       `EPHEMERIS_TYPE`; `CENTER='coord@399'`, `SITE_COORD='E-lon,lat,km'`, `TLIST` in UT), USNO
       `api/rstt/oneday` (only civil twilight; polar cases say "Object continuously above/below the Horizon")
@@ -48,12 +48,22 @@ one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming
 - [x] Accuracy (Jakarta, Tromsø, Cape Town; 6 epochs 2026-11 → 2027-09; 4 days incl. Tromsø polar night
       and polar day). Worst cases vs Horizons: Sun 0.003°, Moon 0.007°, Mercury–Mars ≤ 0.010°, Uranus/Neptune
       ≤ 0.014°, Jupiter 0.038°, **Saturn 0.076°** (JPL Table 1's error, up to 600″, so it may exceed 0.1° on
-      other dates); magnitudes ≤ 0.04 (Saturn's ring term uses the Earth's tilt only); Moon illumination 0.003
+      other dates); magnitudes ≤ 0.04 (Saturn 0.038 — its ring term uses the Earth's tilt only; Mars 0.027; Uranus 0.0014
+      and Neptune 0.0003 once the phase terms apply only beyond 3.1°/1.9°); Moon illumination 0.003
       percentage points. Twilight/sunrise/sunset vs Horizons ≤ 0.04 min; Sun and Moon rise/transit/set and
       civil twilight vs USNO ≤ 0.93 min; 24 principal Moon phases vs USNO ≤ 1.8 min. Test limits are the
       plan's (0.1° / 0.2° / 2 min / 0.2 mag).
-- [x] Speed: one full night (Sun events + Moon + 7 planets rise/transit/set + phase + magnitudes) ≈ 20 ms
-      warm in Node on the cloud container; measure on a phone in PR 3.
+- [x] Speed (warm, Node, cloud container): `nightEvents` ≈ 0.3 ms per night (the Sun's altitude is
+      sampled once at 10-min steps and all four limits are refined from those samples); `moonPhase` ≈ 0.15 ms
+      (new-moon search seeded from the Moon−Sun longitude difference, ±1.5 days; matched a full scan at
+      2,923 instants over 2026–2028); rise/transit/set for the Moon + 7 planets with magnitudes ≈ 15 ms.
+      A whole night ≈ 16 ms. Measure on a phone in PR 3.
+- [x] Ultrareview fixes (2026-11-01): the night window was the display zone's wall-clock noon, so with a
+      zone far from the observer's longitude (Jakarta coordinates, New York zone) it began at night and
+      sunrise came back `none`; it now runs between the Sun's upper transits at the observer's longitude
+      (`solarNoon`, equation of time included), and `nightDate(ms, obs)` picks "tonight" from solar time.
+      `nightEvents(obs, date)` no longer takes a time zone (the panel uses one only to format times).
+      `skyPosition`/`moonPhase` reuse `topocentricVector`.
 - Known limits: nutation and planetary aberration ignored (≤ 0.006°); UT1 = UTC; Horizons applies the
   Mercury polynomial beyond the paper's 170° phase angle, so we do too; a horizon dip shorter than the
   10-min scan can be missed (a body grazing the horizon near the poles).
@@ -64,6 +74,9 @@ one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming
 - **Horizons quantity 4 is airless by default** ("Atmos refraction: NO"), so it compares directly with
   geometric altitudes; quantity 1 is *topocentric* astrometric RA/Dec when `CENTER` is a site.
 - **`asin` loses precision near ±90°** (alt at the zenith came out 89.999999°); `atan2(up, horizontal)` doesn't.
+- **A night belongs to the observer's longitude, not the clock's time zone**: anything built on wall-clock
+  noon breaks when someone looks at a far-away place (or a zone that's hours off solar time, e.g. western
+  China). Use solar noon; format in the zone only at the end.
 - arxiv.org is not on the cloud allowlist; the Mallama & Hilton coefficients were checked against Horizons'
   magnitudes instead (same model).
 - **Workers Builds runs `wrangler preview` (open beta) for non-`main` branches**, and it fails unless

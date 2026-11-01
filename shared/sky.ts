@@ -296,10 +296,8 @@ export function topocentricVector(geo: Vec3, ms: number, obs: Observer): Vec3 {
 
 /** Where a body is in the observer's sky at `ms`. */
 export function skyPosition(body: SkyBody, ms: number, obs: Observer): SkyPosition {
-  const lst = localSiderealTime(ms, obs.lon);
-  const topo = sub(geocentricVectorOfDate(body, ms), observerVector(obs, lst));
-  const { ra, dec, dist } = vecToRaDec(topo);
-  const { alt, az } = equatorialToHorizontal(ra, dec, lst, obs.lat);
+  const { ra, dec, dist } = vecToRaDec(topocentricVector(geocentricVectorOfDate(body, ms), ms, obs));
+  const { alt, az } = equatorialToHorizontal(ra, dec, localSiderealTime(ms, obs.lon), obs.lat);
   return { ra, dec, dist, alt, az, apparentAlt: apparentAltitude(alt) };
 }
 
@@ -378,17 +376,11 @@ export function moonPhaseName(lonDiff: number): MoonPhaseName {
  * ~1° parallax changes the illuminated fraction by up to ~1 percentage point).
  */
 export function moonPhase(ms: number, obs?: Observer): MoonPhase {
-  let moon = moonVectorOfDate(ms);
-  let sun = sunVectorOfDate(ms);
-  if (obs) {
-    const o = observerVector(obs, localSiderealTime(ms, obs.lon));
-    moon = sub(moon, o);
-    sun = sub(sun, o);
-  }
+  const geoMoon = moonVectorOfDate(ms), geoSun = sunVectorOfDate(ms);
+  const moon = obs ? topocentricVector(geoMoon, ms, obs) : geoMoon;
+  const sun = obs ? topocentricVector(geoSun, ms, obs) : geoSun;
   const phaseAngle = vectorAngle(sub(sun, moon), scale(moon, -1));
   const lonDiff = moonSunLonDiff(ms);
-  const news = moonPhaseEvents(ms - 31 * DAY, ms + MINUTE, "New Moon").filter((e) => e.ms <= ms);
-  const lastNew = news.at(-1)?.ms ?? ms;
   return {
     illuminated: (1 + Math.cos(phaseAngle * DEG)) / 2,
     phaseAngle,
@@ -396,8 +388,22 @@ export function moonPhase(ms: number, obs?: Observer): MoonPhase {
     lonDiff,
     waxing: lonDiff < 180,
     name: moonPhaseName(lonDiff),
-    ageDays: (ms - lastNew) / DAY,
+    ageDays: (ms - previousNewMoon(ms, lonDiff)) / DAY,
   };
+}
+
+/** Mean synodic month, days. */
+const SYNODIC_MONTH = 29.530589;
+
+/**
+ * The last new moon at or before `ms`. Seeded from the current Moon−Sun longitude difference at the
+ * mean synodic rate, then searched ±1.5 days (the true time differs from the mean-rate estimate by
+ * well under a day).
+ */
+export function previousNewMoon(ms: number, lonDiff = moonSunLonDiff(ms)): number {
+  const estimate = ms - (lonDiff / 360) * SYNODIC_MONTH * DAY;
+  const found = moonPhaseEvents(estimate - 1.5 * DAY, Math.min(estimate + 1.5 * DAY, ms), "New Moon");
+  return found.at(-1)?.ms ?? estimate;
 }
 
 /* ------------------------------------------------------------------ */
@@ -476,10 +482,14 @@ export function planetMagnitude(
       // Globe only (outside the ring model's range; not reachable from the Earth).
       return a <= 6 ? base - 8.95 - 3.7e-4 * a + 6.16e-4 * a ** 2 : null;
     }
-    case "uranus":
-      return base - 7.11 - 8.4e-4 * (extra.uranusLat ?? 0) + 6.587e-3 * a + 1.045e-4 * a ** 2;
+    case "uranus": {
+      // The phase terms apply only beyond the largest phase angle seen from the Earth (3.1°).
+      const v = base - 7.11 - 8.4e-4 * (extra.uranusLat ?? 0);
+      return a > 3.1 ? v + 6.587e-3 * a + 1.045e-4 * a ** 2 : v;
+    }
     case "neptune":
-      return base - 7.0 + 7.944e-3 * a + 9.617e-5 * a ** 2;
+      // Likewise beyond 1.9° (never from the Earth).
+      return a > 1.9 ? base - 7.0 + 7.944e-3 * a + 9.617e-5 * a ** 2 : base - 7.0;
   }
 }
 
@@ -526,25 +536,44 @@ export interface Crossing {
  * `tol` ms. A dip shorter than `step` can be missed (a body grazing the horizon for a few minutes).
  */
 export function findCrossings(f: (ms: number) => number, start: number, end: number, step = 10 * MINUTE, tol = 1000): Crossing[] {
+  return refineCrossings(f, sampleFunction(f, start, end, step), 0, tol);
+}
+
+/** Samples of a function on a regular grid (the last step may be shorter). */
+export interface Samples {
+  t: number[];
+  v: number[];
+}
+
+export function sampleFunction(f: (ms: number) => number, start: number, end: number, step = 10 * MINUTE): Samples {
+  const t: number[] = [], v: number[] = [];
+  for (let x = start; ; x = Math.min(x + step, end)) {
+    t.push(x);
+    v.push(f(x));
+    if (x >= end) break;
+  }
+  return { t, v };
+}
+
+/**
+ * Crossings of `f(t) = level` found from precomputed samples of `f`, so one set of samples serves
+ * several levels (sunset and the three twilights). Bisects each sign change to `tol` ms.
+ */
+export function refineCrossings(f: (ms: number) => number, samples: Samples, level: number, tol = 1000): Crossing[] {
   const out: Crossing[] = [];
-  let t0 = start, f0 = f(start);
-  while (t0 < end) {
-    const t1 = Math.min(t0 + step, end);
-    const f1 = f(t1);
-    if ((f0 < 0) !== (f1 < 0)) {
-      let lo = t0, hi = t1, flo = f0;
-      while (hi - lo > tol) {
-        const mid = (lo + hi) / 2, fm = f(mid);
-        if ((fm < 0) === (flo < 0)) [lo, flo] = [mid, fm];
-        else hi = mid;
-      }
-      // A sign change across a wrap (e.g. an hour angle jumping from +180° to −180°) is not a root.
-      const jump = Math.abs(f1 - f0);
-      const fmid = f((lo + hi) / 2);
-      if (!(jump > 180 && Math.abs(fmid) > 90)) out.push({ ms: Math.round((lo + hi) / 2), rising: f0 < 0 });
+  const { t, v } = samples;
+  for (let k = 1; k < t.length; k++) {
+    const f0 = v[k - 1]! - level, f1 = v[k]! - level;
+    if ((f0 < 0) === (f1 < 0)) continue;
+    let lo = t[k - 1]!, hi = t[k]!, flo = f0;
+    while (hi - lo > tol) {
+      const mid = (lo + hi) / 2, fm = f(mid) - level;
+      if ((fm < 0) === (flo < 0)) [lo, flo] = [mid, fm];
+      else hi = mid;
     }
-    t0 = t1;
-    f0 = f1;
+    // A sign change across a wrap (e.g. an hour angle jumping from +180° to −180°) is not a root.
+    if (Math.abs(f1 - f0) > 180 && Math.abs(f((lo + hi) / 2) - level) > 90) continue;
+    out.push({ ms: Math.round((lo + hi) / 2), rising: f0 < 0 });
   }
   return out;
 }
@@ -599,10 +628,9 @@ export type NightEvent =
   | { state: "none" };
 
 export interface NightEvents {
-  /** The window: local noon to the next local noon, UTC ms. */
+  /** The window: the observer's solar noon to the next one, UTC ms. */
   start: number;
   end: number;
-  timeZone: string;
   sunset: NightEvent;
   sunrise: NightEvent;
   civilDusk: NightEvent;
@@ -614,11 +642,10 @@ export interface NightEvents {
   astronomicalDawn: NightEvent;
 }
 
-function limitEvents(obs: Observer, start: number, end: number, limit: number): [NightEvent, NightEvent] {
-  const f = (t: number) => skyPosition("sun", t, obs).alt - limit;
-  const c = findCrossings(f, start, end);
+function limitEvents(sunAlt: (ms: number) => number, samples: Samples, limit: number): [NightEvent, NightEvent] {
+  const c = refineCrossings(sunAlt, samples, limit);
   if (!c.length) {
-    const s: NightEvent = f(start) >= 0 ? { state: "always-above" } : { state: "always-below" };
+    const s: NightEvent = samples.v[0]! >= limit ? { state: "always-above" } : { state: "always-below" };
     return [s, s];
   }
   const down = c.find((x) => !x.rising);
@@ -627,16 +654,58 @@ function limitEvents(obs: Observer, start: number, end: number, limit: number): 
 }
 
 /**
- * Sunset, twilights and sunrise for the night that starts on the local calendar date `date`
- * ("YYYY-MM-DD") in `timeZone` (IANA name): the window runs from local noon to the next local noon.
+ * Sunset, twilights and sunrise for the observer's night that starts on `date` ("YYYY-MM-DD", the
+ * observer's own calendar date; see `nightDate`). The window runs from the Sun's upper transit
+ * (solar noon at the observer's longitude) to the next one, so it always starts at the Sun's
+ * highest point whatever time zone the results are shown in. The Sun's altitude is sampled once
+ * and all four limits are found from those samples.
  */
-export function nightEvents(obs: Observer, date: string, timeZone: string): NightEvents {
-  const [start, end] = nightWindow(date, timeZone);
-  const [sunset, sunrise] = limitEvents(obs, start, end, SUN_HORIZON);
-  const [civilDusk, civilDawn] = limitEvents(obs, start, end, TWILIGHT.civil);
-  const [nauticalDusk, nauticalDawn] = limitEvents(obs, start, end, TWILIGHT.nautical);
-  const [astronomicalDusk, astronomicalDawn] = limitEvents(obs, start, end, TWILIGHT.astronomical);
-  return { start, end, timeZone, sunset, sunrise, civilDusk, civilDawn, nauticalDusk, nauticalDawn, astronomicalDusk, astronomicalDawn };
+export function nightEvents(obs: Observer, date: string): NightEvents {
+  const [start, end] = nightWindow(date, obs);
+  const sunAlt = (t: number) => skyPosition("sun", t, obs).alt;
+  const samples = sampleFunction(sunAlt, start, end);
+  const [sunset, sunrise] = limitEvents(sunAlt, samples, SUN_HORIZON);
+  const [civilDusk, civilDawn] = limitEvents(sunAlt, samples, TWILIGHT.civil);
+  const [nauticalDusk, nauticalDawn] = limitEvents(sunAlt, samples, TWILIGHT.nautical);
+  const [astronomicalDusk, astronomicalDawn] = limitEvents(sunAlt, samples, TWILIGHT.astronomical);
+  return { start, end, sunset, sunrise, civilDusk, civilDawn, nauticalDusk, nauticalDawn, astronomicalDusk, astronomicalDawn };
+}
+
+/** Sidereal rate, degrees of hour angle per ms (360.9856°/day). */
+const HOUR_ANGLE_RATE = 360.98564736629 / DAY;
+
+/**
+ * The Sun's upper transit nearest the mean solar noon of `date` at the observer's longitude, UTC ms
+ * (mean noon corrected by the equation of time; two iterations reach well under a second).
+ */
+export function solarNoon(date: string, obs: Observer): number {
+  const [y, m, d] = date.split("-").map(Number) as [number, number, number];
+  let t = Date.UTC(y, m - 1, d, 12) - (obs.lon / 360) * DAY;
+  for (let k = 0; k < 2; k++) {
+    const ha = norm180(localSiderealTime(t, obs.lon) - vecToRaDec(sunVectorOfDate(t)).ra);
+    t -= ha / (HOUR_ANGLE_RATE - 360 / 365.2422 / DAY);
+  }
+  return Math.round(t);
+}
+
+/** The observer's night window for `date`: solar noon to the next solar noon, UTC ms. */
+export function nightWindow(date: string, obs: Observer): [number, number] {
+  const [y, m, d] = date.split("-").map(Number) as [number, number, number];
+  const next = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+  return [solarNoon(date, obs), solarNoon(next, obs)];
+}
+
+/**
+ * The date whose night window contains `ms` ("tonight", or last night before solar noon): the
+ * calendar date of local mean solar time minus 12 h. Independent of the display time zone.
+ */
+export function nightDate(ms: number, obs: Observer): string {
+  const date = new Date(ms + (obs.lon / 360) * DAY - 12 * HOUR).toISOString().slice(0, 10);
+  const [start, end] = nightWindow(date, obs);
+  // The equation of time (≤ 16 min) can move the true window edge across `ms`.
+  if (ms < start) return new Date(Date.parse(date) - DAY).toISOString().slice(0, 10);
+  if (ms >= end) return new Date(Date.parse(date) + DAY).toISOString().slice(0, 10);
+  return date;
 }
 
 /* ------------------------------------------------------------------ */
@@ -678,13 +747,6 @@ export function zonedTimeToUtc(date: string, hour: number, minute: number, timeZ
   let t = wall - timeZoneOffset(wall, timeZone) * MINUTE;
   t = wall - timeZoneOffset(t, timeZone) * MINUTE;
   return t;
-}
-
-/** Local noon of `date` to local noon of the next day, UTC ms. */
-export function nightWindow(date: string, timeZone: string): [number, number] {
-  const start = zonedTimeToUtc(date, 12, 0, timeZone);
-  const next = localDate(start + 30 * HOUR, timeZone);
-  return [start, zonedTimeToUtc(next, 12, 0, timeZone)];
 }
 
 /** The browser's own IANA time zone (used for manually entered coordinates). */

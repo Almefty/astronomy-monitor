@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { angularSeparation } from "../shared/astro";
 import {
   findCrossings, geocentricVectorOfDate, gmst, localDate, localSiderealTime, moonPhase, moonPhaseEvents, moonPhaseName,
-  nightEvents, nightWindow, norm180, planetAstrometric, planetInfo, planetMagnitude, PRESET_PLACES, refraction,
+  nightDate, nightEvents, nightWindow, norm180, previousNewMoon, solarNoon, planetAstrometric, planetInfo, planetMagnitude, PRESET_PLACES, refraction,
   refractionFromApparent, riseTransitSet, skyPosition, SKY_PLANETS, timeZoneOffset, toObserver, vecToRaDec, zonedTimeToUtc,
   equatorialToHorizontal, type NightEvent, type SkyBody, type SkyPlanet,
 } from "../shared/sky";
@@ -94,7 +94,7 @@ describe("positions vs JPL Horizons", () => {
 });
 
 describe("brightness and phases vs JPL Horizons", () => {
-  it("planet magnitudes within 0.2 (measured ≤ 0.04; Saturn's simplified ring term ≤ 0.04)", () => {
+  it("planet magnitudes within 0.2 (measured ≤ 0.04: Saturn's simplified ring term 0.038, Mars 0.027)", () => {
     for (const body of SKY_PLANETS) {
       for (const r of POS.jakarta![body]!) {
         const info = planetInfo(body, r.ms);
@@ -112,6 +112,11 @@ describe("brightness and phases vs JPL Horizons", () => {
       expect(Math.abs(planetInfo(body, p.ms).elongation - angularSeparation(sun.ra, sun.dec, p.ra, p.dec)), body).toBeLessThan(0.1);
     }
     expect(planetMagnitude("venus", 0.72, 0.27, 179.5)).toBeNull();
+    // Uranus/Neptune phase terms apply only beyond the largest geocentric phase angle (3.1°, 1.9°).
+    expect(planetMagnitude("uranus", 19, 18, 3.0)).toBe(planetMagnitude("uranus", 19, 18, 0));
+    expect(planetMagnitude("uranus", 19, 18, 10)!).toBeGreaterThan(planetMagnitude("uranus", 19, 18, 3.0)! + 0.07);
+    expect(planetMagnitude("neptune", 30, 29, 1.8)).toBe(planetMagnitude("neptune", 30, 29, 0));
+    expect(planetMagnitude("neptune", 30, 29, 5)!).toBeGreaterThan(planetMagnitude("neptune", 30, 29, 0)! + 0.04);
     expect(planetMagnitude("venus", 0.72, 0.27, 170)).not.toBeNull();
   });
 
@@ -148,6 +153,12 @@ describe("Moon phases vs USNO", () => {
     expect(moonPhase(full + 4 * 86_400_000).name).toBe("Waning Gibbous");
     expect(moonPhase(full + 4 * 86_400_000).waxing).toBe(false);
     expect(moonPhaseName(359)).toBe("New Moon");
+    // The seeded ±1.5-day search agrees with USNO's new moons just after and before each one
+    // (3 min margin: the model's times differ from USNO's by up to 1.8 min).
+    for (const r of ref.filter((x) => x.phase === "New Moon")) {
+      expect(minutes(previousNewMoon(r.ms + 3 * 60_000), r.ms)).toBeLessThan(2);
+      expect(previousNewMoon(r.ms - 3 * 60_000)).toBeLessThan(r.ms - 25 * 86_400_000);
+    }
     expect(moonPhaseName(84)).toBe("First Quarter");
     expect(moonPhaseName(83)).toBe("Waxing Crescent");
     expect(moonPhaseName(275)).toBe("Last Quarter");
@@ -157,14 +168,15 @@ describe("Moon phases vs USNO", () => {
 
 describe("night events", () => {
   const TW = fx.twilight as unknown as Record<string, Record<string, { windowStart: number; events: { limit: number; kind: string; ms: number }[] }>>;
-  // The fixture used each site's standard offset for "local noon"; fixed-offset IANA zones reproduce it.
-  const ZONE: Record<string, string> = { jakarta: "Asia/Jakarta", tromso: "Etc/GMT-1", capetown: "Africa/Johannesburg" };
+  const sunHourAngle = (t: number, obs: { lat: number; lon: number }) => norm180(localSiderealTime(t, obs.lon) - skyPosition("sun", t, obs).ra);
 
   for (const [site, days] of Object.entries(TW)) {
     it(`sunset, twilights and sunrise at ${site} vs Horizons' Sun elevation (≤ 2 min; measured 0.04)`, () => {
       for (const [day, ref] of Object.entries(days)) {
-        const n = nightEvents(SITES[site]!, day, ZONE[site]!);
-        expect(n.start).toBe(ref.windowStart);
+        const n = nightEvents(SITES[site]!, day);
+        // The window starts at the Sun's upper transit (the fixture's window began at zone noon).
+        expect(Math.abs(sunHourAngle(n.start, SITES[site]!)), `${day} start`).toBeLessThan(0.01);
+        expect(Math.abs(n.start - ref.windowStart)).toBeLessThan(2 * 3_600_000);
         const pick: Record<string, NightEvent> = {
           "-0.8333down": n.sunset, "-0.8333up": n.sunrise, "-6down": n.civilDusk, "-6up": n.civilDawn,
           "-12down": n.nauticalDusk, "-12up": n.nauticalDawn, "-18down": n.astronomicalDusk, "-18up": n.astronomicalDawn,
@@ -175,18 +187,52 @@ describe("night events", () => {
   }
 
   it("reports polar night and polar day as states, not NaN", () => {
-    const winter = nightEvents(SITES.tromso!, "2026-12-21", "Europe/Oslo");
+    const winter = nightEvents(SITES.tromso!, "2026-12-21");
     expect(winter.sunset).toEqual({ state: "always-below" });
     expect(winter.sunrise).toEqual({ state: "always-below" });
     expect(winter.astronomicalDusk.state).toBe("time");
-    const summer = nightEvents(SITES.tromso!, "2027-06-21", "Europe/Oslo");
+    const summer = nightEvents(SITES.tromso!, "2027-06-21");
     for (const k of ["sunset", "sunrise", "civilDusk", "nauticalDawn", "astronomicalDusk", "astronomicalDawn"] as const) {
       expect(summer[k]).toEqual({ state: "always-above" });
     }
     // White nights: London in June has no astronomical darkness, but does have a sunset.
-    const london = nightEvents({ lat: 51.51, lon: -0.13 }, "2027-06-21", "Europe/London");
+    const london = nightEvents({ lat: 51.51, lon: -0.13 }, "2027-06-21");
     expect(london.sunset.state).toBe("time");
     expect(london.astronomicalDusk).toEqual({ state: "always-above" });
+  });
+
+  it("finds the whole night when the display time zone is far from the observer (Jakarta seen from New York)", () => {
+    const jakarta = SITES.jakarta!;
+    // The old window (New York's wall-clock noon) began in Jakarta's night, so sunrise came back "none".
+    expect(skyPosition("sun", zonedTimeToUtc("2026-11-01", 12, 0, "America/New_York"), jakarta).alt).toBeLessThan(0);
+    // 21:00 in New York on 1 Nov is 08:00 on 2 Nov in Jakarta: the night just ended is Jakarta's night of 1 Nov.
+    const now = zonedTimeToUtc("2026-11-01", 21, 0, "America/New_York");
+    const date = nightDate(now, jakarta);
+    expect(date).toBe("2026-11-01");
+    const n = nightEvents(jakarta, date);
+    expect(n.start).toBeLessThanOrEqual(now);
+    expect(n.end).toBeGreaterThan(now);
+    const ref = TW.jakarta!["2026-11-01"]!.events;
+    const sunset = ref.find((e) => e.limit === -0.8333 && e.kind === "down")!.ms;
+    const sunrise = ref.find((e) => e.limit === -0.8333 && e.kind === "up")!.ms;
+    expect(minutes(at(n.sunset), sunset)).toBeLessThan(2);
+    expect(minutes(at(n.sunrise), sunrise)).toBeLessThan(2);
+    for (const k of ["civilDawn", "nauticalDawn", "astronomicalDawn"] as const) expect(n[k].state, k).toBe("time");
+    // Shown in New York time, Jakarta's sunrise on 2 Nov falls on the evening of 1 Nov.
+    expect(localDate(at(n.sunrise), "America/New_York")).toBe("2026-11-01");
+  });
+
+  it("picks tonight's date from the observer's solar time, not the clock's zone", () => {
+    const jakarta = SITES.jakarta!;
+    const noon = solarNoon("2026-11-01", jakarta);
+    expect(nightDate(noon - 60_000, jakarta)).toBe("2026-10-31");
+    expect(nightDate(noon + 60_000, jakarta)).toBe("2026-11-01");
+    // Near the date line: solar noon at 179.9° E is around 00:00 UTC of the same date.
+    const fiji = { lat: -18, lon: 179.9 };
+    expect(nightDate(solarNoon("2026-11-01", fiji) + 3_600_000, fiji)).toBe("2026-11-01");
+    const samoa = { lat: -14, lon: -171.8 };
+    expect(nightDate(solarNoon("2026-11-01", samoa) + 3_600_000, samoa)).toBe("2026-11-01");
+    expect(Math.abs(sunHourAngle(solarNoon("2026-11-01", samoa), samoa))).toBeLessThan(0.01);
   });
 
   const US = fx.usno as unknown as Record<string, Record<string, { tz: number; sun: { phen: string; ms: number | null }[]; moon: { phen: string; ms: number | null }[] }>>;
@@ -219,7 +265,7 @@ describe("night events", () => {
   }
 
   it("gives planet rise/transit/set with a transit altitude", () => {
-    const [start, end] = nightWindow("2026-11-01", "Asia/Jakarta");
+    const [start, end] = nightWindow("2026-11-01", SITES.jakarta!);
     for (const p of SKY_PLANETS) {
       const r = riseTransitSet(p as SkyPlanet, SITES.jakarta!, start, end);
       expect(r.state).toBe("normal"); // near the equator everything rises and sets
@@ -260,10 +306,11 @@ describe("time zones and places", () => {
     expect(localDate(Date.UTC(2026, 10, 1, 18), "Asia/Jakarta")).toBe("2026-11-02");
   });
 
-  it("builds a noon-to-noon window that spans a DST change", () => {
-    const [a, b] = nightWindow("2026-10-24", "Europe/Oslo"); // clocks go back on 25 October
-    expect(a).toBe(Date.UTC(2026, 9, 24, 10));
-    expect(b - a).toBe(25 * 3_600_000);
+  it("builds the night window from solar noon, unaffected by daylight saving time", () => {
+    const [a, b] = nightWindow("2026-10-24", SITES.tromso!); // Norway's clocks go back on 25 October
+    expect(Math.abs(b - a - 86_400_000)).toBeLessThan(60_000); // solar days vary by < 30 s
+    // Mean solar noon at 18.96° E is 10:44 UTC; the equation of time moves it by ≤ 16 min.
+    expect(Math.abs(a - (Date.UTC(2026, 9, 24, 12) - (18.96 / 360) * 86_400_000))).toBeLessThan(17 * 60_000);
   });
 
   it("validates and rounds observer coordinates to 0.01°", () => {
