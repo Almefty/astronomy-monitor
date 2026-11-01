@@ -6,7 +6,7 @@
  * touch one Worker module, never the visualizations.
  */
 
-export type SourceId = "neo" | "solar" | "exoplanets" | "apod" | "apod-archive" | "gcn" | "telescopes" | "goes" | "orbits";
+export type SourceId = "neo" | "solar" | "exoplanets" | "apod" | "apod-archive" | "gcn" | "telescopes" | "goes" | "orbits" | "satellites";
 
 export type KeyMode = "secret" | "demo";
 
@@ -129,6 +129,56 @@ export interface OrbitsData {
   approaches: CloseApproach[];
   /** Orbits keyed by primary designation; objects without one are missing. */
   orbits: Record<string, SmallBodyOrbit>;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sky tonight (v4): spacecraft orbital elements from CelesTrak         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The OMM fields SGP4 needs, with CelesTrak's keyword names and units (degrees, revolutions per
+ * day; `EPOCH` is UTC without a zone suffix, as CelesTrak sends it). satellite.js's `json2satrec`
+ * reads this object directly.
+ */
+export type SatelliteOmm = {
+  OBJECT_NAME: string;
+  /** International designator, e.g. "1998-067A". */
+  OBJECT_ID: string;
+  NORAD_CAT_ID: number;
+  EPOCH: string;
+  MEAN_MOTION: number;
+  ECCENTRICITY: number;
+  INCLINATION: number;
+  RA_OF_ASC_NODE: number;
+  ARG_OF_PERICENTER: number;
+  MEAN_ANOMALY: number;
+  BSTAR: number;
+  MEAN_MOTION_DOT: number;
+  MEAN_MOTION_DDOT: number;
+  ELEMENT_SET_NO: number;
+};
+
+export interface SatelliteElements {
+  /** NORAD catalog number. */
+  id: number;
+  /** Short display name ("ISS"). */
+  name: string;
+  /**
+   * Standard magnitude: brightness at 1,000 km range, half illuminated (McCants' convention).
+   * Brightness estimates scale it by range and phase; real brightness varies with attitude.
+   */
+  stdMag: number;
+  /** Element-set epoch, ISO 8601 UTC. Predictions degrade quickly once this is more than a few days old. */
+  epoch: string;
+  omm: SatelliteOmm;
+}
+
+export interface SatellitesData {
+  satellites: SatelliteElements[];
+  /** Objects in the list whose elements couldn't be loaded this time. */
+  unavailable: { id: number; name: string; reason: string }[];
+  /** Elements older than this many days are flagged as stale. */
+  staleAfterDays: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -454,4 +504,5 @@ export type SourceDataMap = {
   telescopes: TelescopeData;
   goes: GoesData;
   orbits: OrbitsData;
+  satellites: SatellitesData;
 };

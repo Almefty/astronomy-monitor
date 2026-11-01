@@ -66,6 +66,12 @@ commands) and `TASKS.md` (state, known issues, lessons) first.
 - JPL's SBDB Query API: spaces aren't allowed in `EQ` (use anchored `RE`), the filter must stay
   under ~1,000 characters (502 otherwise), and `sb-group=neo` makes it ~15× faster.
 
+## Sky tonight (v4)
+- **satellite.js stays out of the main bundle.** Only `src/viz/passes.ts` may import it (a test checks);
+  the panel loads that file with `import()`. Location never leaves the browser (see `docs/plans/sky-tonight.md`).
+- **CelesTrak's usage policy:** GP data updates every 2 hours; keep `maxAge` ≥ 7,200 s, one call per object
+  (`CATNR` takes one number), and stop at the first non-200 answer. Don't fetch whole groups.
+
 ## Commands
 - `npm run dev` — local dashboard at http://localhost:5173 (uses `scripts/dev.mjs`, see TASKS.md)
 - `npm test`, `npm run typecheck`, `npm run build`, `npm run check` (all three)

@@ -26,6 +26,8 @@ It now counts requests that succeeded (a request overtaken by a newer refresh of
 one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming failed panels.
 **2026-11-01 (v4, PR 1 of 3):** topocentric astronomy math for the coming "Sky tonight" panel
 (`shared/sky.ts`, no UI yet; see "Version 4 — Sky tonight" and `docs/plans/sky-tonight.md`). 127 unit tests pass.
+**2026-11-01 (v4, PR 2 of 3):** spacecraft elements and visible passes: Worker source `satellites` (CelesTrak)
+and `src/viz/passes.ts` (SGP4 via satellite.js, not loaded by the page yet). 150 unit tests pass.
 
 # Version 4 — Sky tonight (in progress, plan in `docs/plans/sky-tonight.md`)
 
@@ -68,6 +70,54 @@ one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming
   Mercury polynomial beyond the paper's 170° phase angle, so we do too; a horizon dip shorter than the
   10-min scan can be missed (a body grazing the horizon near the poles).
 
+## PR 2 — spacecraft elements and visible passes (2026-11-01)
+- [x] Worker source `satellites` (`worker/sources/satellites.ts`, `SatellitesData` in `shared/contract.ts`): the
+      ISS (25544), Tiangong (48274) and Hubble (20580), listed once with their standard magnitudes. CelesTrak's
+      `gp.php?CATNR=<id>&FORMAT=JSON` takes **one** catalog number per query (`CATNR=a,b` → "not an integer"), so
+      3 calls of ~420 bytes, made **one after another** and stopped at the first non-200 answer (CelesTrak's
+      usage policy). The answer keeps only the OMM fields SGP4 needs plus name, ID and epoch. No query parameters
+      (one cache entry for everyone). Missing objects → `unavailable` + warning (uncached); stale epochs (> 7 days)
+      → **info** notice, so the answer stays cached (re-downloading can't make CelesTrak's elements newer).
+- [x] CelesTrak verified live (2026-11-01): ISS answer 420 bytes, no `Cache-Control`; an unknown catalog number is
+      **HTTP 404 "No GP data found"** (text/plain); a malformed query is **HTTP 200** with a plain-text message; `FORMAT`
+      defaults to CSV since 2026-05-09. **Usage policy** (https://celestrak.org/usage-policy.php, updated 2026-05-22):
+      GP data updates every 2 hours, download it once per update, and stop at any non-200 answer (repeats go to the
+      firewall). So `maxAge` = **7,200 s**: Cloudflare's cache answers repeats, and each data centre asks at most
+      once per update.
+- [x] `src/viz/passes.ts` — the only file that imports `satellite.js` (7.1.0, MIT; a test enforces it; the main
+      bundle is byte-identical, `index-*.js` same hash). `json2satrec` reads CelesTrak's OMM JSON directly (no
+      conversion needed). Visible = above 10°, sunlit (cylindrical shadow of the equatorial radius), observer's Sun
+      below −6°. Dark intervals from the Sun's altitude (10-min samples, bisection), then a 20-s scan per
+      satellite with edges bisected to 0.5 s, the peak by golden-section search, an edge cause per end
+      (`horizon` / `shadow` / `twilight` / `window`), a 20-s track for the dome, and the brightest estimated
+      magnitude (McCants: std − 15.75 + 2.5·log10(range² / f), f = (1 + cos phase)/2). Satellites fail
+      independently (bad elements, SGP4 error, elements > 30 days from the search dates). `passSearchWindow`
+      = now → end of the 4th night (tonight first).
+- [x] **Skip-ahead**: while the angle at the Earth's centre between observer and satellite exceeds the largest
+      angle at which it can be above 10° (polar radius, apogee radius, +1°), no pass can start before that gap
+      closes at the satellite's fastest angular rate plus the Earth's rotation (+5%). ≈ 15× faster (4 sites ×
+      3 spacecraft × 4 full days: 356 → 22 ms);
+      a test checks it finds the same passes as the plain 20-s scan (3 spacecraft × 4 sites × 4 days).
+- [x] Tests (`test/satellites.test.ts`, 23): Worker normalizer and policy behaviour (one call per object, stop at
+      the first error, partial answers uncached, stale = info and cached); **SGP4 vs Vallado et al. 2006 (AIAA
+      2006-6753)** — all 31 non-error cases ≤ 1e-8 km / 1e-9 km/s; the reference was run in AFSPC mode, so 23599
+      (the "Lyddane choice" deep-space case) is checked in AFSPC mode (8e-9 km) and differs by 0.96 km in
+      satellite.js's default "improved" mode, by design; both error cases report errors. OMM vs TLE of the same
+      update: 0.6 m over 4 days. **ISS vs JPL Horizons** (`-125544` is served, "TLE-based", elements revised 31 Oct):
+      46 passes above 10° at Jakarta, Cape Town and London over 4 days, none at Tromsø (correct: 51.6° inclination);
+      rise/peak/set ≤ 0.8 s, peak altitude ≤ 0.04° (≤ 0.25° above 80°, where the reference's parabola is the
+      limit), 20-s positions ≤ 0.07°. Cylindrical shadow vs satellite.js's conical `shadowFraction`: 2 of
+      103,680 ten-second samples differ. Fixtures: `test/fixtures/satellites-reference.json` (20 KB) and
+      `sgp4-vallado.json` (65 KB), rebuilt by `scripts/fetch-satellite-fixtures.mjs [--vallado]`.
+- [x] Speed (Node, cloud container, 3 spacecraft × 4 nights): **2.4–4.5 ms** per observer warm, 29 ms for the
+      very first call (JIT warm-up). Measure on a phone in PR 3.
+- Known limits: standard magnitudes are rough (from McCants' qs.mag via Stellarium's catalogue; ISS −2.5,
+  Tiangong 1.87 — probably too faint, may predate its 2022 modules — Hubble 1.5); Heavens-Above and McCants'
+  site aren't reachable from the cloud allowlist to cross-check. Real brightness varies by a magnitude or more
+  with attitude. Shadow edges ±10 s (no penumbra/atmosphere). SGP4 timing degrades by seconds per day of element
+  age, more after a reboost. Cloudflare Workers share outgoing IP addresses, so CelesTrak could block one for
+  someone else's traffic; the panel must cope with the source failing (PR 3).
+
 ## Lessons learned (v4)
 - **Node's built-in `fetch` ignores `HTTPS_PROXY`**: in the cloud container run fixture scripts with
   `NODE_USE_ENV_PROXY=1` (it returned 503s without it). curl works as is.
@@ -77,6 +127,16 @@ one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming
 - **A night belongs to the observer's longitude, not the clock's time zone**: anything built on wall-clock
   noon breaks when someone looks at a far-away place (or a zone that's hours off solar time, e.g. western
   China). Use solar noon; format in the zone only at the end.
+- **CelesTrak answers "not found" with HTTP 404 and bad queries with HTTP 200 + text**, so check the body, not
+  just the status. Its tunnel through the cloud proxy resets intermittently; the fixture script retries network
+  errors (not HTTP errors, which the usage policy says to stop at).
+- **Vallado's reference SGP4 output was made in AFSPC mode** (`opsmode = 'a'` in `testmat.m`); compare in that mode
+  or expect the deep-space Lyddane case (23599) to differ. The end of `tmatverDec2015.out` has a stray debug row.
+- **Near the zenith, elevation against time is V-shaped**, not parabolic: a parabola through samples misses the
+  peak by tenths of a degree, and azimuth swings fastest there (compare directions, not azimuths).
+- Horizons takes `STEP_SIZE` as a number of intervals for sub-minute steps (`'10 s'` → "Unknown units").
+- Local `npm run dev` in the cloud container can't reach any upstream (workerd ignores `HTTPS_PROXY`); verify
+  Worker routes on the Workers Builds preview instead.
 - arxiv.org is not on the cloud allowlist; the Mallama & Hilton coefficients were checked against Horizons'
   magnitudes instead (same model).
 - **Workers Builds runs `wrangler preview` (open beta) for non-`main` branches**, and it fails unless
