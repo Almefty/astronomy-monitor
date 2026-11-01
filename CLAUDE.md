@@ -78,9 +78,11 @@ commands) and `TASKS.md` (state, known issues, lessons) first.
 - The panel computes the Sun, Moon and planets without a refresh (`PanelDefinition.initial()`); only
   `/api/sources/satellites` waits for a press, and its failure stays inside the passes section (`PanelResult.failed`).
 - **CelesTrak's usage policy:** GP data updates every 2 hours; keep `maxAge` ≥ 7,200 s, one call per object
-  (`CATNR` takes one number), and stop at the first non-200 answer (its "No GP data found" 404 is an answer
-  about one object, not a failure). Failures are cached for 600 s (`failureMaxAge`, the exception above), so
-  an outage isn't re-requested by every visitor. Don't fetch whole groups.
+  (`CATNR` takes one number), never retry. The three calls run **in parallel** (CelesTrak can take 5–10 s per
+  answer; in a row they took ~24 s), each with a 25 s timeout (`REQUEST_TIMEOUT_MS`). Any non-200 (except its
+  "No GP data found" 404, an answer about one object), timeout or network error makes the answer a failure or
+  partial one, cached for 600 s (`failureMaxAge`, the exception above): that is how the Worker "stops after a
+  non-200": no further request from that data centre for 10 minutes. Don't fetch whole groups.
 
 ## Commands
 - `npm run dev` — local dashboard at http://localhost:5173 (uses `scripts/dev.mjs`, see TASKS.md)

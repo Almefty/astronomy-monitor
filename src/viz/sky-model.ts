@@ -403,8 +403,46 @@ export function utcOffsetLabel(ms: number, tz: string): string {
 
 /** Parse a coordinate typed by a visitor ("−6.2", "6,2"), or NaN. */
 export function parseCoordinate(text: string): number {
-  const t = text.trim().replace(/[−–]/g, "-").replace(",", ".").replace(/°$/, "");
-  return /^-?\d{1,3}(\.\d+)?$/.test(t) ? Number(t) : NaN;
+  const t = normalizeCoordinate(text);
+  return /^[-+]?\d{1,3}(\.\d+)?$/.test(t) ? Number(t) : NaN;
+}
+
+function normalizeCoordinate(text: string): string {
+  return text.trim().replace(/[−–]/g, "-").replace(",", ".").replace(/°$/, "");
+}
+
+/** +1 = north/east, −1 = south/west (the value of the hemisphere selects in the picker). */
+export type Hemisphere = 1 | -1;
+
+/** The sign typed in a coordinate field ("−33.9" → −1, "+18" → 1), or null when there is none. */
+export function typedSign(text: string): Hemisphere | null {
+  const t = normalizeCoordinate(text);
+  return t.startsWith("-") ? -1 : t.startsWith("+") ? 1 : null;
+}
+
+/**
+ * A coordinate from the picker's number field and its N/S (or E/W) select. One rule: a typed sign
+ * wins (and the select should be switched to match, `hemi`); without one, the select decides.
+ * "-33.87" with S is 33.87° S, not N. `value` is NaN when the text isn't a number.
+ */
+export function coordinateFromInput(text: string, select: Hemisphere): { value: number; hemi: Hemisphere } {
+  const v = parseCoordinate(text);
+  const sign = typedSign(text);
+  return sign === null ? { value: Math.abs(v) * select, hemi: select } : { value: v, hemi: sign };
+}
+
+/** The picker's hemisphere selects: the saved location's, else north and east. */
+export function defaultHemispheres(loc: { lat: number; lon: number } | null): { lat: Hemisphere; lon: Hemisphere } {
+  return { lat: loc && loc.lat < 0 ? -1 : 1, lon: loc && loc.lon < 0 ? -1 : 1 };
+}
+
+/**
+ * How far a place's mean solar time is from its time zone's clock, hours, wrapped to [−12, 12):
+ * Tonga (175° W on UTC+13) is −0.7 h, not −24.7 h.
+ */
+export function solarOffsetHours(lon: number, zoneOffsetMinutes: number): number {
+  const d = lon / 15 - zoneOffsetMinutes / 60;
+  return ((((d + 12) % 24) + 24) % 24) - 12;
 }
 
 const fmtCache = new Map<string, Intl.DateTimeFormat>();

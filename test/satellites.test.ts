@@ -9,7 +9,7 @@ import {
 import { canonicalApiPath, handleApi } from "../worker/api";
 import type { Env } from "../worker/lib/env";
 import { SOURCES } from "../worker/sources/index";
-import { FAILURE_MAX_AGE, ommEpochMs, SATELLITE_LIST, slimOmm, STALE_AFTER_DAYS } from "../worker/sources/satellites";
+import { FAILURE_MAX_AGE, ommEpochMs, REQUEST_TIMEOUT_MS, SATELLITE_LIST, slimOmm, STALE_AFTER_DAYS } from "../worker/sources/satellites";
 import ref from "./fixtures/satellites-reference.json";
 import vallado from "./fixtures/sgp4-vallado.json";
 
@@ -112,27 +112,67 @@ describe("CelesTrak elements (Worker)", () => {
 
   // Deliberate exception to "no-store for errors" (CLAUDE.md): CelesTrak asks clients to stop after
   // errors, so failed and partial answers are cached for FAILURE_MAX_AGE instead of being re-requested.
-  it("stops at the first error, as CelesTrak's usage policy asks, and caches the failure briefly", async () => {
+  it("asks for the three objects at the same time, with a timeout that allows a slow CelesTrak", async () => {
+    // CelesTrak answered in 5–10 s per request in Nov 2026; one after another took ~24 s.
+    expect(REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
+    const events: string[] = [];
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const id = Number(new URL(String(input instanceof Request ? input.url : input)).searchParams.get("CATNR"));
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      events.push(`start ${id}`);
+      await new Promise((r) => setTimeout(r, 40));
+      events.push(`end ${id}`);
+      return Response.json(OMM[id]);
+    });
+    const t0 = Date.now();
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(Date.now() - t0).toBeLessThan(110); // ~40 ms in parallel, ≥ 120 ms in a row
+    expect(events.slice(0, 3)).toEqual(["start 25544", "start 48274", "start 20580"]);
+    const body = (await res.json()) as Envelope<SatellitesData>;
+    // Results keep the list order whatever order the answers arrive in.
+    expect(body.data.satellites.map((s) => s.name)).toEqual(["ISS", "Tiangong", "Hubble"]);
+    expect(body.upstream.map((c) => c.name)).toEqual(["CelesTrak GP elements (ISS)", "CelesTrak GP elements (Tiangong)", "CelesTrak GP elements (Hubble)"]);
+  });
+
+  it("caches the answer only briefly after any error, as CelesTrak's usage policy asks", async () => {
     expect(FAILURE_MAX_AGE).toBe(600);
-    const asked = stub({ 25544: () => new Response("Service Unavailable", { status: 503 }) });
+    const asked = stub({
+      25544: () => new Response("Service Unavailable", { status: 503 }),
+      48274: () => new Response("Service Unavailable", { status: 503 }),
+      20580: () => new Response("Service Unavailable", { status: 503 }),
+    });
     const res = await get();
     expect(res.status).toBe(502);
     expect(res.headers.get("cache-control")).toBe("public, max-age=600");
-    expect(asked).toEqual([25544]);
+    // One request per object, never a retry.
+    expect(asked.sort()).toEqual([20580, 25544, 48274]);
   });
 
-  it("serves what loaded before an error with a warning, cached briefly", async () => {
+  it("serves the objects that loaded with a warning when one request fails, cached briefly", async () => {
     const asked = stub({ 48274: () => new Response("Forbidden", { status: 403 }) });
     const res = await get();
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("public, max-age=600");
     const body = (await res.json()) as Envelope<SatellitesData>;
-    expect(asked).toEqual([25544, 48274]);
+    expect(asked).toHaveLength(3);
+    expect(body.data.satellites.map((s) => s.name)).toEqual(["ISS", "Hubble"]);
+    expect(body.data.unavailable.map((u) => [u.name, u.reason])).toEqual([["Tiangong", expect.stringContaining("HTTP 403")]]);
+    expect(body.notices).toEqual([{ level: "warning", text: expect.stringContaining("for Tiangong couldn’t be loaded") }]);
+  });
+
+  it("treats a timeout or network failure like an HTTP error", async () => {
+    vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+      const id = Number(new URL(String(input instanceof Request ? input.url : input)).searchParams.get("CATNR"));
+      if (id === 20580) throw Object.assign(new Error("The operation timed out."), { name: "TimeoutError" });
+      if (id === 48274) throw new TypeError("network connection lost");
+      return Response.json(OMM[id]);
+    });
+    const res = await get();
+    expect(res.headers.get("cache-control")).toBe("public, max-age=600");
+    const body = (await res.json()) as Envelope<SatellitesData>;
     expect(body.data.satellites.map((s) => s.name)).toEqual(["ISS"]);
-    expect(body.data.unavailable.map((u) => [u.name, u.reason])).toEqual([
-      ["Tiangong", expect.stringContaining("HTTP 403")],
-      ["Hubble", "Not requested after an earlier CelesTrak error."],
-    ]);
+    expect(body.data.unavailable.map((u) => u.reason)).toEqual([expect.stringContaining("could not be reached"), `CelesTrak GP elements (Hubble) did not respond within ${REQUEST_TIMEOUT_MS / 1000} s.`]);
     expect(body.notices).toEqual([{ level: "warning", text: expect.stringContaining("Tiangong and Hubble") }]);
   });
 
@@ -147,11 +187,12 @@ describe("CelesTrak elements (Worker)", () => {
     expect(body.notices).toEqual([{ level: "info", text: expect.stringContaining("no usable orbital elements for Tiangong") }]);
   });
 
-  it("stops at any other HTTP 404", async () => {
-    const asked = stub({ 48274: () => new Response("Not Found", { status: 404 }) });
+  it("treats any other HTTP 404 as a failure", async () => {
+    stub({ 48274: () => new Response("Not Found", { status: 404 }) });
     const res = await get();
     expect(res.headers.get("cache-control")).toBe("public, max-age=600");
-    expect(asked).toEqual([25544, 48274]);
+    const body = (await res.json()) as Envelope<SatellitesData>;
+    expect(body.data.unavailable.map((u) => u.reason)).toEqual([expect.stringContaining("HTTP 404: Not Found")]);
   });
 
   it("treats an answer that isn't an element set (HTTP 200 with a text message) like missing elements", async () => {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { angularSeparation } from "../shared/astro";
-import { moonPhase, nightEvents, riseTransitSet, skyPosition, SKY_PLANETS, type Observer } from "../shared/sky";
+import { moonPhase, nightEvents, riseTransitSet, skyPosition, SKY_PLANETS, timeZoneOffset, type Observer } from "../shared/sky";
 import {
-  computeTonight, dayLabel, DARK_SUN_ALT, domeAngle, domePoint, fmtMag, formatCoords, GLARE_ELONGATION, hhmm, intersect, MIN_PLANET_ALT,
+  computeTonight, coordinateFromInput, dayLabel, defaultHemispheres, solarOffsetHours, typedSign, DARK_SUN_ALT, domeAngle, domePoint, fmtMag, formatCoords, GLARE_ELONGATION, hhmm, intersect, MIN_PLANET_ALT,
   moonLitBearing, nightSentences, parseCoordinate, parseLocation, passTimes, skyBearing, skyOffset, utcOffsetLabel,
 } from "../src/viz/sky-model";
 
@@ -199,9 +199,47 @@ describe("location and formatting", () => {
 
   it("parses typed coordinates", () => {
     expect(parseCoordinate("6.2")).toBe(6.2);
+    expect(parseCoordinate("+18.4")).toBe(18.4);
     expect(parseCoordinate(" −33,92 ")).toBe(-33.92);
     expect(parseCoordinate("18°")).toBe(18);
     for (const bad of ["", "abc", "1e3", "12.3.4", "1234"]) expect(parseCoordinate(bad)).toBeNaN();
+  });
+
+  it("a typed sign wins over the N/S or E/W select; without one the select decides", () => {
+    // Sign typed: it wins, and the select is to be switched to match (hemi).
+    expect(coordinateFromInput("-33.87", -1)).toEqual({ value: -33.87, hemi: -1 }); // was 33.87° N
+    expect(coordinateFromInput("-33.87", 1)).toEqual({ value: -33.87, hemi: -1 });
+    expect(coordinateFromInput("−151.21", 1)).toEqual({ value: -151.21, hemi: -1 }); // Unicode minus
+    expect(coordinateFromInput("+18.42", -1)).toEqual({ value: 18.42, hemi: 1 });
+    // No sign: the select decides.
+    expect(coordinateFromInput("33.87", -1)).toEqual({ value: -33.87, hemi: -1 });
+    expect(coordinateFromInput("33.87", 1)).toEqual({ value: 33.87, hemi: 1 });
+    expect(coordinateFromInput(" 6,2 ", -1)).toEqual({ value: -6.2, hemi: -1 });
+    expect(coordinateFromInput("abc", 1).value).toBeNaN();
+    expect(typedSign("  -1")).toBe(-1);
+    expect(typedSign("1")).toBeNull();
+  });
+
+  it("defaults the hemisphere selects to north and east without a saved location", () => {
+    expect(defaultHemispheres(null)).toEqual({ lat: 1, lon: 1 });
+    expect(defaultHemispheres({ lat: -33.92, lon: 18.42 })).toEqual({ lat: -1, lon: 1 });
+    expect(defaultHemispheres({ lat: 40.71, lon: -74.01 })).toEqual({ lat: 1, lon: -1 });
+  });
+
+  it("wraps the solar-time offset into [−12, 12) h, so places across the date line get no false warning", () => {
+    const off = (lon: number, tz: string) => solarOffsetHours(lon, timeZoneOffset(Date.parse("2026-11-01T12:00:00Z"), tz));
+    expect(Math.abs(off(-175.2, "Pacific/Tongatapu"))).toBeLessThan(1); // UTC+13
+    expect(Math.abs(off(-171.76, "Pacific/Apia"))).toBeLessThan(1.5); // Samoa, UTC+13
+    expect(Math.abs(off(-157.36, "Pacific/Kiritimati"))).toBeLessThan(1); // Kiribati, UTC+14
+    expect(Math.abs(off(106.8, "Asia/Jakarta"))).toBeLessThan(1);
+    expect(off(170.5, "UTC")).toBeCloseTo(170.5 / 15, 6); // 11.37 h is inside the range: unchanged (and warned about)
+    expect(Math.abs(off(87.6, "Asia/Shanghai"))).toBeGreaterThan(2); // Ürümqi on Beijing time: a real gap
+    for (const d of [-25, -12, -0.5, 0, 11.99, 12, 36]) {
+      const w = solarOffsetHours(d * 15, 0);
+      expect(w).toBeGreaterThanOrEqual(-12);
+      expect(w).toBeLessThan(12);
+      expect((((w - d) % 24) + 24) % 24).toBeCloseTo(0, 9);
+    }
   });
 
   it("formats coordinates, offsets, magnitudes and times", () => {

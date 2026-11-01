@@ -1,5 +1,5 @@
 import type { SatelliteElements, SatelliteOmm, SatellitesData } from "../../shared/contract";
-import { SourceError } from "../lib/upstream";
+import { SourceError, type Upstream } from "../lib/upstream";
 import { num } from "../lib/util";
 import type { SourceModule } from "./types";
 
@@ -92,6 +92,43 @@ export function epochAgeDays(epochMs: number, now: number): number {
   return (now - epochMs) / 86_400_000;
 }
 
+/**
+ * Per-request timeout. CelesTrak was seen answering in 5–10 s per request (2026-11); the requests run in
+ * parallel, so this bounds the whole load. Generous, because a timeout costs a 10-minute failure cache.
+ */
+export const REQUEST_TIMEOUT_MS = 25_000;
+
+type Outcome =
+  | { sat: (typeof SATELLITE_LIST)[number]; kind: "ok"; omm: SatelliteOmm }
+  | { sat: (typeof SATELLITE_LIST)[number]; kind: "missing"; reason: string }
+  | { sat: (typeof SATELLITE_LIST)[number]; kind: "error"; error: SourceError };
+
+/** One object's elements; never throws (failures become an outcome). */
+async function fetchOne(upstream: Upstream, sat: (typeof SATELLITE_LIST)[number]): Promise<Outcome> {
+  const url = `${GP}?CATNR=${sat.id}&FORMAT=JSON`;
+  let text: string;
+  try {
+    const res = await upstream.fetch(`CelesTrak GP elements (${sat.name})`, url, { acceptStatus: [404], timeoutMs: REQUEST_TIMEOUT_MS });
+    text = await res.text();
+    if (res.status === 404) {
+      // CelesTrak's documented answer for an object without current elements: about that object, not a failure.
+      if (!NO_DATA.test(text)) throw new SourceError("upstream", `CelesTrak GP elements (${sat.name}) answered HTTP 404: ${text.slice(0, 120).trim()}`);
+      return { sat, kind: "missing", reason: "CelesTrak has no current elements for it." };
+    }
+  } catch (err) {
+    return { sat, kind: "error", error: err instanceof SourceError ? err : new SourceError("upstream", String((err as Error)?.message ?? err)) };
+  }
+  let json: unknown = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // CelesTrak answers some bad queries with HTTP 200 and a plain-text message.
+  }
+  const omm = slimOmm(json, sat.id);
+  if (!omm) return { sat, kind: "missing", reason: `CelesTrak's answer had no usable elements (starts with "${text.slice(0, 60).trim()}").` };
+  return { sat, kind: "ok", omm };
+}
+
 export const satellitesSource: SourceModule<"satellites"> = {
   id: "satellites",
   title: "Sky tonight (spacecraft orbital elements)",
@@ -101,51 +138,32 @@ export const satellitesSource: SourceModule<"satellites"> = {
   failureMaxAge: FAILURE_MAX_AGE,
 
   async load({ upstream, now, notices }) {
+    // CATNR takes one catalog number per query (a list is rejected), so one small call per object
+    // (~420 bytes each). They run in parallel: CelesTrak can take 5–10 s per answer, and three in a row
+    // took ~24 s in production. Any failure (non-200 other than "No GP data found", timeout, network
+    // error) makes the whole answer a failure or a partial one, which is cached for FAILURE_MAX_AGE only,
+    // so after an error no request goes to CelesTrak from that data centre for 10 minutes (its usage
+    // policy asks clients to stop after a non-200). In parallel the other two calls are already on their
+    // way when one fails: at most two extra requests per error, not a retry.
+    const outcomes = await Promise.all(SATELLITE_LIST.map((sat) => fetchOne(upstream, sat)));
     const satellites: SatelliteElements[] = [];
     const unavailable: SatellitesData["unavailable"] = [];
     /** Objects CelesTrak answered for without usable elements (the same until its next update). */
     const missing: string[] = [];
+    /** Objects whose request failed (non-200, timeout, network). */
+    const failed: string[] = [];
     let firstError: SourceError | null = null;
-
-    // CATNR takes one catalog number per query (a list is rejected), so one small call per object
-    // (~420 bytes each), one after another. CelesTrak asks clients to stop at the first non-200 answer
-    // (it may mean overload or a block), so a failure skips the remaining calls. The one exception is
-    // its documented "No GP data found" (HTTP 404) for an object it has no elements for: that is an
-    // answer about that object, not a failure, so the others are still asked for.
-    for (const sat of SATELLITE_LIST) {
-      if (firstError) {
-        unavailable.push({ id: sat.id, name: sat.name, reason: "Not requested after an earlier CelesTrak error." });
-        continue;
+    for (const o of outcomes) {
+      if (o.kind === "ok") {
+        satellites.push({ id: o.sat.id, name: o.sat.name, stdMag: o.sat.stdMag, epoch: new Date(ommEpochMs(o.omm.EPOCH)!).toISOString(), omm: o.omm });
+      } else if (o.kind === "missing") {
+        unavailable.push({ id: o.sat.id, name: o.sat.name, reason: o.reason });
+        missing.push(o.sat.name);
+      } else {
+        unavailable.push({ id: o.sat.id, name: o.sat.name, reason: o.error.message });
+        failed.push(o.sat.name);
+        firstError ??= o.error;
       }
-      const url = `${GP}?CATNR=${sat.id}&FORMAT=JSON`;
-      let text: string;
-      try {
-        const res = await upstream.fetch(`CelesTrak GP elements (${sat.name})`, url, { acceptStatus: [404] });
-        text = await res.text();
-        if (res.status === 404) {
-          if (!NO_DATA.test(text)) throw new SourceError("upstream", `CelesTrak GP elements (${sat.name}) answered HTTP 404: ${text.slice(0, 120).trim()}`);
-          unavailable.push({ id: sat.id, name: sat.name, reason: "CelesTrak has no current elements for it." });
-          missing.push(sat.name);
-          continue;
-        }
-      } catch (err) {
-        firstError = err instanceof SourceError ? err : new SourceError("upstream", String((err as Error)?.message ?? err));
-        unavailable.push({ id: sat.id, name: sat.name, reason: firstError.message });
-        continue;
-      }
-      let json: unknown = null;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        // CelesTrak answers some bad queries with HTTP 200 and a plain-text message.
-      }
-      const omm = slimOmm(json, sat.id);
-      if (!omm) {
-        unavailable.push({ id: sat.id, name: sat.name, reason: `CelesTrak's answer had no usable elements (starts with "${text.slice(0, 60).trim()}").` });
-        missing.push(sat.name);
-        continue;
-      }
-      satellites.push({ id: sat.id, name: sat.name, stdMag: sat.stdMag, epoch: new Date(ommEpochMs(omm.EPOCH)!).toISOString(), omm });
     }
 
     if (!satellites.length) {
@@ -153,9 +171,8 @@ export const satellitesSource: SourceModule<"satellites"> = {
       throw firstError ?? new SourceError("parse", "CelesTrak returned no usable orbital elements.");
     }
     const names = (list: string[]) => list.join(" and ");
-    if (firstError) {
+    if (failed.length) {
       // A warning: this partial answer is cached for FAILURE_MAX_AGE, not the full two hours.
-      const failed = unavailable.map((u) => u.name).filter((n) => !missing.includes(n));
       notices.push({ level: "warning", text: `Orbital elements for ${names(failed)} couldn’t be loaded from CelesTrak this time; no passes are predicted for ${failed.length > 1 ? "them" : "it"}.` });
     }
     // An object CelesTrak answered for but has no usable elements is the same on every request until

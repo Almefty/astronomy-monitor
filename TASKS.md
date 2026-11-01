@@ -32,6 +32,8 @@ ultrareview fixes (see PR 2 below).
 **2026-11-01 (v4, PR 3 of 3):** the "Sky tonight" panel (`src/panels/sky.ts`, after APOD): location picker,
 tonight's events, Moon, planets, spacecraft passes, sky dome, "Right now" summary. 182 unit tests pass. Not deployed
 yet (see PR 3 below for what was and wasn't verified).
+**2026-11-01 (v4, PR 3 review fixes):** nine fixes from the maintainer's review, incl. CelesTrak requests in parallel
+(see "PR 3 review fixes" below). 187 unit tests pass.
 
 # Version 4 — Sky tonight (in progress, plan in `docs/plans/sky-tonight.md`)
 
@@ -141,7 +143,45 @@ yet (see PR 3 below for what was and wasn't verified).
   "lost in the Sun's glare"); visibility uses fixed thresholds (5°, −6°, 10° from the Sun), not limiting magnitude
   or sky brightness; times for manual coordinates are in the browser's zone, not the place's.
 
+## PR 3 review fixes (2026-11-01)
+1. **Coordinate sign vs hemisphere select**: "-33.87" with S became 33.87° N (sign × select). One rule now
+   (`coordinateFromInput` in `src/viz/sky-model.ts`): a typed sign (ASCII minus, Unicode minus or plus) wins and the select switches to
+   match, as you type and on submit; without a sign the select decides. Unit tests for both, and a browser check
+   ("-33.87" + S → 33.87° S; "+74.01" with W picked → 74.01° E).
+2. **Default hemispheres** were S/E with no saved location; now N/E (`defaultHemispheres`). Tested, and checked in the browser.
+3. **New night not detected in a hidden tab**: the clock compared the night with the shared `tonightCache`, which the
+   strip's `summarize()` refreshes every minute even while the panel isn't redrawn, so the panel kept showing last
+   night. The render now remembers the night it drew (`drawnNight`). Browser check with Playwright's clock (Jakarta,
+   tab hidden across solar noon, then shown): the old code kept the 1 Nov slider range and the chosen 22:10, the new
+   code moves to 2 Nov.
+4. On a new night `view.ms`, `view.domeNight`, `view.passKey` (and "Show all") are reset before `build()`, so an
+   afternoon view picks the new night's start of darkness again.
+5. **Late geolocation answers** are ignored when another location was chosen meanwhile (`locationVersion`) or the
+   render was destroyed. Browser check: answer delayed 1.5 s, Jakarta picked meanwhile → stays Jakarta.
+6. An unusable position (rejected by `toObserver`) re-enables "Use my location" and removes `is-busy`, like the error path.
+7. The time-zone note's solar offset is wrapped to [−12, 12) h (`solarOffsetHours`): Tonga, Samoa and Kiritimati
+   (west longitudes on UTC+13/+14) no longer get a false note; Ürümqi on Beijing time still does. Tested.
+8. The dome tooltip uses the planet's `glare` status and the footnote `GLARE_ELONGATION` instead of a literal 10.
+9. **CelesTrak in parallel**: the maintainer saw CelesTrak answering in 5–10 s per request on the preview; one after
+   another that was ~24 s in production, and the preview hit the 15 s default timeout on the first call. The three
+   requests now run in parallel (still one per object, never retried), each with a **25 s** timeout
+   (`REQUEST_TIMEOUT_MS`; a timeout costs a 10-minute failure cache, so it is generous; the browser waits up to 100 s).
+   Any non-200 other than "No GP data found", a timeout or a network error makes the answer a failure (502) or a
+   partial one with a warning, both cached for 600 s, so no request leaves that data centre for 10 minutes. The
+   trade-off: in parallel the other two calls are already sent when one fails (at most two extra requests per
+   error), where the sequential version skipped them. Results keep the list order; `unavailable` no longer says
+   "Not requested after an earlier CelesTrak error". Tests: the three requests start before any finishes (~40 ms
+   total with 40 ms stubs), timeouts and network errors count as failures, any other 404 is a failure.
+   CLAUDE.md's CelesTrak rule updated. **Not verified against the live CelesTrak** from here (cloud container); check
+   the response time on the next Workers Builds preview.
+- `npm run check` passes (187 tests); production preview re-checked at 360 px light, 375 px dark and 1280 px, no
+  horizontal scroll, no console errors.
+
 ## Lessons learned (v4, PR 3)
+- **Test against the code you are fixing**: the hidden-tab new-night check was run once against the previous
+  `sky.ts` to confirm it fails there.
+- **`vite preview` serves the build it started with**: restart it after `npm run build` (already noted for v3), or
+  a check silently runs the old bundle.
 - **A lazy library can still break the build**: tests import satellite.js in Node and passed for all of PR 2, but
   the first `vite build` with the page importing it failed on its unused WASM runtime. Run `npm run build` as soon
   as a new library reaches the page.
@@ -154,7 +194,8 @@ yet (see PR 3 below for what was and wasn't verified).
 - [x] Worker source `satellites` (`worker/sources/satellites.ts`, `SatellitesData` in `shared/contract.ts`): the
       ISS (25544), Tiangong (48274) and Hubble (20580), listed once with their standard magnitudes. CelesTrak's
       `gp.php?CATNR=<id>&FORMAT=JSON` takes **one** catalog number per query (`CATNR=a,b` → "not an integer"), so
-      3 calls of ~420 bytes, made **one after another** and stopped at the first non-200 answer (CelesTrak's
+      3 calls of ~420 bytes, made **one after another** and stopped at the first non-200 answer (*changed in the PR 3
+      review fixes: now in parallel*; CelesTrak's
       usage policy), except its "No GP data found" 404 (see the ultrareview fixes). The answer keeps only the OMM
       fields SGP4 needs plus name, ID and epoch. No query parameters (one cache entry for everyone). Stale epochs
       (> 7 days) → **info** notice, so the answer keeps its cache lifetime (re-downloading can't make CelesTrak's

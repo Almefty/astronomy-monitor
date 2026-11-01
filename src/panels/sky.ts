@@ -12,7 +12,8 @@ import { load as loadStored, remove as removeStored, save as saveStored } from "
 // Types only: satellite.js (inside passes.ts) is loaded with import() when there is something to predict.
 import type { PassPrediction, VisiblePass } from "../viz/passes";
 import {
-  dayLabel, fmtMag, formatCoords, hhmm, LOCATION_KEY, parseCoordinate, parseLocation, passTimes, utcOffsetLabel, type SkyLocation,
+  coordinateFromInput, dayLabel, defaultHemispheres, fmtMag, formatCoords, GLARE_ELONGATION, hhmm, LOCATION_KEY, parseLocation, passTimes,
+  solarOffsetHours, typedSign, utcOffsetLabel, type Hemisphere, type SkyLocation,
   BODY_NAMES, computeTonight, DARK_SUN_ALT, domeAngle, domePoint, MIN_PLANET_ALT, moonLitBearing, NAKED_EYE_MAG, nightSentences,
   skyBearing, skyState, SKY_STATE_TEXT, whereInSky, type AltAz, type Interval, type PlanetTonight, type RiseSet, type Tonight,
 } from "../viz/sky-model";
@@ -56,6 +57,9 @@ const view = {
   showAllPasses: false,
   pickerOpen: false,
 };
+
+/** Bumped whenever a location is chosen or forgotten, so a late geolocation answer can tell it was overtaken. */
+let locationVersion = 0;
 
 const observerOf = (loc: SkyLocation): Observer => ({ lat: loc.lat, lon: loc.lon });
 const zoneOf = (loc: SkyLocation): string => loc.timeZone ?? browserTimeZone();
@@ -155,10 +159,15 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
   const content = h("div", { class: "sky-content" });
   root.append(h("div", { class: "sky" }, locRow, picker, content));
   let token = 0;
+  /** Set when the panel re-renders or goes away: late async answers (geolocation) are ignored. */
+  let destroyed = false;
+  /** The night this render last drew ("YYYY-MM-DD"); the clock compares against it, not the shared cache. */
+  let drawnNight: string | null = null;
   /** Redraws for the clock: the pass list (and dome) once passes are known, else the dome alone. */
   const ticker = { passes: null as (() => void) | null, dome: null as { draw(): void } | null };
 
   function setLocation(loc: SkyLocation | null) {
+    locationVersion++;
     view.loc = loc;
     view.ms = null;
     view.domeNight = null;
@@ -181,7 +190,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       const zone = off === tz ? tz : `${tz} (${off})`;
       const zoneText = loc.timeZone ? `Times in ${zone}` : `Times in your browser’s time zone, ${zone}`;
       // A place far from the zone's own longitude: say so, the times are still right but may look odd.
-      const solarOffsetH = loc.lon / 15 - timeZoneOffset(Date.now(), tz) / 60;
+      const solarOffsetH = solarOffsetHours(loc.lon, timeZoneOffset(Date.now(), tz));
       const change = h(
         "button",
         { type: "button", class: "btn btn-small", "aria-expanded": String(view.pickerOpen), "aria-controls": "sky-picker" },
@@ -227,22 +236,31 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       geoBtn.disabled = true;
       geoBtn.title = "Your browser doesn’t offer location here";
     }
+    const geoIdle = () => {
+      geoBtn.disabled = false;
+      geoBtn.classList.remove("is-busy");
+    };
     geoBtn.addEventListener("click", () => {
       geoBtn.disabled = true;
       geoBtn.classList.add("is-busy");
       status.textContent = "Asking your browser for your location…";
+      // An answer can take many seconds: drop it if another place was chosen meanwhile or the panel re-rendered.
+      const asked = locationVersion;
+      const stale = () => destroyed || asked !== locationVersion;
       navigator.geolocation.getCurrentPosition(
         (pos) => {
+          if (stale()) return;
           const obs = toObserver(pos.coords.latitude, pos.coords.longitude);
           if (!obs) {
-            status.textContent = "Your browser returned an unusable position.";
+            geoIdle();
+            status.textContent = "Your browser returned an unusable position. Pick a city or enter coordinates instead.";
             return;
           }
           setLocation({ kind: "device", name: null, lat: obs.lat, lon: obs.lon, timeZone: null });
         },
         (err) => {
-          geoBtn.disabled = false;
-          geoBtn.classList.remove("is-busy");
+          if (stale()) return;
+          geoIdle();
           status.textContent =
             err.code === err.PERMISSION_DENIED
               ? "Location access was refused. Pick a city or enter coordinates instead."
@@ -270,8 +288,16 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       sel.value = neg ? "-1" : "1";
       return sel;
     };
-    const latHemi = hemi("sky-lat-h", "N", "S", (cur?.lat ?? -1) < 0, "North or south");
-    const lonHemi = hemi("sky-lon-h", "E", "W", (cur?.lon ?? 1) < 0, "East or west");
+    const hemis = defaultHemispheres(cur);
+    const latHemi = hemi("sky-lat-h", "N", "S", hemis.lat < 0, "North or south");
+    const lonHemi = hemi("sky-lon-h", "E", "W", hemis.lon < 0, "East or west");
+    // A typed sign wins: switch the select to match as soon as it's typed (see coordinateFromInput).
+    for (const [input, sel] of [[latIn, latHemi], [lonIn, lonHemi]] as const) {
+      input.addEventListener("input", () => {
+        const sign = typedSign(input.value);
+        if (sign !== null) sel.value = String(sign);
+      });
+    }
     const form = h(
       "form",
       { class: "sky-coords", novalidate: true },
@@ -281,8 +307,11 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
     );
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
-      const lat = parseCoordinate(latIn.value) * Number(latHemi.value);
-      const lon = parseCoordinate(lonIn.value) * Number(lonHemi.value);
+      const latC = coordinateFromInput(latIn.value, Number(latHemi.value) as Hemisphere);
+      const lonC = coordinateFromInput(lonIn.value, Number(lonHemi.value) as Hemisphere);
+      latHemi.value = String(latC.hemi);
+      lonHemi.value = String(lonC.hemi);
+      const lat = latC.value, lon = lonC.value;
       if (!(Math.abs(lat) <= 90)) {
         status.textContent = "Latitude must be a number from 0 to 90 (degrees north or south).";
         latIn.focus();
@@ -317,6 +346,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
 
   function build() {
     token++;
+    drawnNight = null;
     ticker.passes = null;
     ticker.dome = null;
     hideTip();
@@ -337,6 +367,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       return;
     }
 
+    drawnNight = tonight.date;
     const sentences = nightSentences(tonight.events);
     if (sentences.length) content.append(h("p", { class: "sky-polar" }, sentences.join(" ")));
     content.append(statsRow(tonight, tz, obs, now));
@@ -611,7 +642,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
         const dot = s("circle", { cx: x, cy: y, r: dotRadius(mag), class: faint ? "sky-planet is-faint" : "sky-planet" });
         const rows: [string, string][] = [["Altitude", `${Math.round(pos.apparentAlt)}°`], ["Direction", compassPoint(pos.az)]];
         if (mag !== null) rows.push(["Magnitude", `${fmtMag(mag)}${faint ? " (binoculars)" : ""}`]);
-        if (info && info.elongation < 10) rows.push(["Note", "Lost in the Sun’s glare"]);
+        if (info?.status === "glare") rows.push(["Note", "Lost in the Sun’s glare"]);
         parts.push(mark(p, BODY_NAMES[id], rows, dot));
         label(x, y, BODY_NAMES[id], dotRadius(mag) + 1);
         names.push(BODY_NAMES[id]);
@@ -828,7 +859,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       "p",
       { class: "footnote sky-honesty" },
       "Computed in your browser. Sun, Moon and planets from JPL’s planetary elements and Meeus’ solar and lunar theories: positions within about 0.1°, rise, set and twilight times within about 2 minutes. Planet brightness from the Astronomical Almanac’s model (Mallama & Hilton 2018). “Visible” planets are above ",
-      `${MIN_PLANET_ALT}° while the Sun is below ${DARK_SUN_ALT}° and at least 10° from it. `,
+      `${MIN_PLANET_ALT}° while the Sun is below ${DARK_SUN_ALT}° and at least ${GLARE_ELONGATION}° from it. `,
       "Spacecraft passes are SGP4 predictions from CelesTrak’s orbital elements: usually within a minute while the elements are fresh, more after an orbit boost. Their brightness is a rough estimate (real spacecraft vary by a magnitude or more), and Earth’s shadow is modelled as a simple cylinder (entry and exit ± about 10 s).",
     );
   }
@@ -839,8 +870,15 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
     if (document.hidden || !view.loc) return;
     const now = Date.now();
     const obs = observerOf(view.loc);
-    if (tonightCache && nightDate(now, obs) !== tonightCache.value.date) {
-      build(); // a new night began (solar noon passed)
+    // Compare with the night this render drew: the shared tonightCache may already have moved on
+    // (summarize() refreshes it every minute, also while this tab is hidden and the panel isn't redrawn).
+    if (drawnNight !== null && nightDate(now, obs) !== drawnNight) {
+      // A new night began (solar noon passed): last night's chosen time, dome night and pass are stale.
+      view.ms = null;
+      view.domeNight = null;
+      view.passKey = null;
+      view.showAllPasses = false;
+      build();
       return;
     }
     if (ticker.passes) ticker.passes();
@@ -857,6 +895,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
   build();
   return () => {
     token++;
+    destroyed = true;
     for (const fn of cleanups) fn();
     hideTip();
   };
