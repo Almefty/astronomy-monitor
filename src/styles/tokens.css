@@ -33,6 +33,9 @@
   --critical: #d03b3b;
 
   --sun: #f2a516;
+  /* The Moon's lit and unlit parts (sky panel); neutral, never a data colour. */
+  --moon-lit: #fbfcfd;
+  --moon-dark: #aab4c1;
   --focus: #2a78d6;
   --primary-bg: #0b1220;
   --primary-ink: #ffffff;
@@ -72,6 +75,8 @@
     --series-7: #9085e9;
     --other: #5a6574;
     --sun: #f5b52e;
+    --moon-lit: #e8eef6;
+    --moon-dark: #2c3747;
     --focus: #6aa8f0;
     --primary-bg: #e8eef6;
     --primary-ink: #05080d;
@@ -104,6 +109,8 @@
   --series-7: #9085e9;
   --other: #5a6574;
   --sun: #f5b52e;
+  --moon-lit: #e8eef6;
+  --moon-dark: #2c3747;
   --focus: #6aa8f0;
   --primary-bg: #e8eef6;
   --primary-ink: #05080d;

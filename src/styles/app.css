@@ -2521,3 +2521,423 @@ button:disabled:not(.is-busy) {
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------- Sky tonight (v4) */
+
+.sky-loc {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.sky-loc-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  min-width: 0;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+.sky-loc-text strong {
+  color: var(--ink);
+  font-size: 15px;
+}
+.sky-zone-warn {
+  flex-basis: 100%;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+.sky-intro p {
+  margin: 0;
+  max-width: 70ch;
+  color: var(--ink-2);
+}
+.sky-intro strong {
+  color: var(--ink);
+}
+.sky-picker {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+.sky-picker[hidden] {
+  display: none;
+}
+.sky-picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+.sky-picker-or {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.sky-cities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sky-cities .btn[aria-pressed="true"] {
+  border-color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--ink);
+}
+.sky-coords {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.sky-coords label {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.sky-coord-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.sky-coord-field label {
+  min-width: 64px;
+}
+.sky-coord {
+  display: inline-flex;
+}
+.sky-num,
+.sky-hemi {
+  height: 30px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
+  font: 400 16px/1 var(--font-mono); /* 16px: iOS zooms the page on focus below that */
+}
+.sky-num {
+  width: 92px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+.sky-hemi {
+  padding: 0 4px;
+  border-left: 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+.sky-picker-status {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+}
+.sky-picker-status:empty {
+  display: none;
+}
+.sky-privacy {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+.sky-polar {
+  margin: 0 0 12px;
+  font-weight: 500;
+}
+.sky-stats .stat-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sky-moon-icon {
+  flex: none;
+}
+.sky-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+  gap: 22px 28px;
+  align-items: start;
+}
+.sky-dome-block {
+  min-width: 0;
+}
+.sky-dome-time {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.sky-dome {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+  margin: 0 auto;
+  touch-action: manipulation;
+}
+.sky-horizon {
+  fill: var(--panel-2);
+  stroke: var(--axis);
+  stroke-width: 1;
+}
+.sky-ring {
+  fill: none;
+  stroke: var(--grid);
+  stroke-width: 1;
+}
+.sky-ring-label {
+  fill: var(--ink-3);
+  font: 10px var(--font-mono);
+}
+.sky-compass {
+  fill: var(--ink-2);
+  font: 600 13px var(--font-sans);
+}
+.sky-label {
+  fill: var(--ink);
+  font: 500 11.5px var(--font-sans);
+  paint-order: stroke;
+  stroke: var(--panel-2);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.sky-planet {
+  fill: var(--ink);
+}
+.sky-planet.is-faint {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.2;
+}
+.sky-sun circle {
+  fill: var(--sun);
+}
+.sky-sun line {
+  stroke: var(--sun);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.sky-moon-dark {
+  fill: var(--moon-dark);
+}
+.sky-moon-lit {
+  fill: var(--moon-lit);
+}
+.sky-moon-rim {
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-width: 0.8;
+}
+.sky-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+.sky-pass-line {
+  fill: none;
+  stroke: var(--series-1);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sky-pass-arrow {
+  fill: none;
+  stroke: var(--series-1);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sky-pass-start {
+  fill: var(--series-1);
+}
+.sky-pass-now {
+  fill: var(--series-1);
+  stroke: var(--panel);
+  stroke-width: 2;
+}
+.sky-dome-sun {
+  margin: 6px 0 0;
+  text-align: center;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.sky-time {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 10px;
+}
+.sky-time .btn[aria-pressed="true"] {
+  border-color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--ink);
+}
+.sky-slider-wrap {
+  flex: 1;
+  min-width: 0;
+}
+.sky-slider-track {
+  position: relative;
+}
+.sky-slider {
+  width: 100%;
+  margin: 8px 0 0;
+  accent-color: var(--ink);
+}
+.sky-slider.is-outside {
+  opacity: 0.45;
+}
+.sky-slider-now {
+  position: absolute;
+  top: 1px;
+  width: 2px;
+  height: 6px;
+  margin-left: -1px;
+  background: var(--ink-3);
+  pointer-events: none;
+}
+.sky-slider-now[hidden] {
+  display: none;
+}
+.sky-slider-ends {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.sky-dome-note {
+  margin: 8px 0 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+.sky-side {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.sky-section .chart-head {
+  margin-bottom: 0;
+}
+.sky-planets li.is-dim .name,
+.sky-planets li.is-dim .value {
+  color: var(--ink-2);
+}
+.sky-planets .name {
+  white-space: normal;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.sky-planets .status-tag {
+  font-weight: 400;
+}
+.sky-note {
+  margin: 6px 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.sky-empty p {
+  margin: 6px 0;
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+.sky-empty strong {
+  color: var(--ink);
+}
+.sky-pass-error {
+  min-height: 0;
+  padding: 12px 14px;
+  text-align: left;
+  place-items: start;
+}
+.sky-pass-error p {
+  margin: 0 0 6px;
+}
+.sky-pass-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+}
+.sky-pass-list li {
+  border-bottom: 1px solid var(--line);
+}
+.sky-pass-list li:last-child {
+  border-bottom: 0;
+}
+button.sky-pass {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  width: 100%;
+  padding: 9px 8px;
+  border: 0;
+  border-left: 3px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.sky-pass:hover {
+  background: var(--panel-2);
+}
+button.sky-pass[aria-pressed="true"] {
+  background: var(--series-1-wash);
+  border-left-color: var(--series-1);
+}
+.sky-pass .name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.sky-pass .name .status-tag {
+  font-weight: 400;
+}
+.sky-pass .when {
+  grid-column: 1;
+  font-size: 13px;
+}
+.sky-pass .sub {
+  grid-column: 1;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.sky-pass .value {
+  grid-row: 1 / span 3;
+  grid-column: 2;
+  align-self: center;
+  text-align: right;
+  font: 600 15px/1.2 var(--font-mono);
+}
+.sky-pass .value small {
+  display: block;
+  font: 400 11.5px var(--font-sans);
+  color: var(--ink-3);
+}
+.sky-more {
+  margin: 6px 0;
+  font-size: 13px;
+}
+.sky-honesty {
+  margin-top: 18px;
+}
+
+@media (max-width: 860px) {
+  .sky-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .sky-stats .stat {
+    flex-basis: 40%;
+  }
+  .sky-picker {
+    padding: 12px;
+  }
+}

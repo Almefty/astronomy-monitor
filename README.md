@@ -1,6 +1,6 @@
 # Astronomy Monitor
 
-A one-page dashboard of what is happening in the sky right now: asteroid flybys, the Sun's activity, cosmic explosions, what Webb and Hubble are observing, newly confirmed exoplanets, NASA's picture of the day, and a 3D Solar System you can scrub through time. Everything comes live from public NASA, NOAA, JPL and STScI data, through one Cloudflare Worker on the free plan.
+A one-page dashboard of what is happening in the sky right now: asteroid flybys, the Sun's activity, cosmic explosions, what Webb and Hubble are observing, newly confirmed exoplanets, NASA's picture of the day, a 3D Solar System you can scrub through time, and what you can see in your own sky tonight. Everything comes live from public NASA, NOAA, JPL, STScI and CelesTrak data, through one Cloudflare Worker on the free plan.
 
 **Live:** https://astronomy-monitor.almefty.workers.dev
 
@@ -32,6 +32,7 @@ A one-page dashboard of what is happening in the sky right now: asteroid flybys,
 | **Space telescopes** | What Webb and Hubble are observing right now and next, their targets for the coming days on an all-sky map (with the zone Webb can point at today), and the schedule as a timeline | STScI published schedules · MAST · CDS Sesame |
 | **Exoplanet discoveries** | All ~6,400 confirmed planets in "discovery space" (orbit vs size), their host stars on an all-sky map, discoveries per year, and cards for the newest additions | NASA Exoplanet Archive (TAP) |
 | **Astronomy Picture of the Day** | Today's picture or video with explanation and credit, plus the last week as a filmstrip. Browse the whole archive back to 16 June 1995: pick any date (the date heading is a date picker) or press **Random day**; **Back to today** returns. A chosen day is in the page link (`?apod=1998-03-05`), so it can be shared | NASA APOD |
+| **Sky tonight** | For a place you choose (your device's location, a city, or coordinates): sunset, darkness and sunrise, the Moon's phase (drawn as it looks in your sky) and rise/set, each planet's visibility tonight with the reason when it isn't visible (below the horizon, too close to the Sun, only in daylight), best time, direction, altitude and brightness, and visible passes of the ISS, Tiangong and Hubble over the next four nights, brightest marked. A sky dome (zenith in the centre, north up, east left) shows the Sun, Moon, planets and the selected pass at any time from sunset to sunrise. Polar day and night are said in plain words. Everything except the spacecraft orbits is computed in your browser and needs no request; **your location never leaves the browser** | JPL planetary elements (Table 1) · Meeus (Sun, Moon) · CelesTrak GP orbital elements |
 | **Solar System in 3D** | The Sun, planets, the Moon and every asteroid from the close-approach panel at their computed positions, in a 3D view you can rotate, pan and zoom (touch too). Play time forward or backward at 1 hour to 1 year per second, or jump to any date 1900–2049 or to an asteroid's closest approach. "Near Earth" follows Earth and shows the Moon's orbit and the selected asteroid's path relative to Earth. Each asteroid's official close approach is shown next to this view's own estimate | JPL planetary elements (Table 1) · JPL SBDB orbits · CNEOS Close Approach Data |
 
 Data is fetched **when you press a button**: "Refresh all" at the top, a panel's own ↻ button, or a control that asks for something new (an APOD date, "Random day"). A shared `?apod=` link asks before loading that day. Your last results are kept in your browser so the page isn't empty when you come back. Each panel loads independently, so if one source is down, the rest still work. A line under the heading sums up the last refresh ("7 of 7 panels loaded · oldest data 25 min old"). Answers can come from Cloudflare's cache for up to each source's cache lifetime, so every panel also shows the real age of its own data.
@@ -46,7 +47,7 @@ All data is fetched from the public services below. None of it is redistributed 
 |---|---|---|
 | [CNEOS Close Approach Data API](https://ssd-api.jpl.nasa.gov/doc/cad.html) | Asteroid close approaches | NASA/JPL Center for Near-Earth Object Studies |
 | [SBDB Query API](https://ssd-api.jpl.nasa.gov/doc/sbdb_query.html) | Asteroid orbits for the 3D view | NASA/JPL Solar System Dynamics |
-| [Approximate Positions of the Planets](https://ssd.jpl.nasa.gov/planets/approx_pos.html) (E. M. Standish) | Planet positions (built into the code) | NASA/JPL Solar System Dynamics |
+| [Approximate Positions of the Planets](https://ssd.jpl.nasa.gov/planets/approx_pos.html) (E. M. Standish) | Planet positions for the 3D view and "Sky tonight" (built into the code) | NASA/JPL Solar System Dynamics |
 | [DONKI](https://ccmc.gsfc.nasa.gov/tools/DONKI/) | Flares, CMEs, geomagnetic storms, WSA-ENLIL arrivals | NASA Community Coordinated Modeling Center (CCMC) |
 | [SWPC GOES X-ray data](https://www.swpc.noaa.gov/products/goes-x-ray-flux) | Real-time X-ray flux and flare list | NOAA Space Weather Prediction Center |
 | [GCN Circulars](https://gcn.nasa.gov/circulars) | Cosmic explosions and the circular reader | NASA General Coordinates Network. Circulars are written by the observers who submit them |
@@ -55,7 +56,7 @@ All data is fetched from the public services below. None of it is redistributed 
 | [Sesame name resolver](https://cds.unistra.fr/cgi-bin/Sesame) | Target positions from catalog names | CDS, Strasbourg Astronomical Observatory, France |
 | [NASA Exoplanet Archive](https://exoplanetarchive.ipac.caltech.edu/) | Exoplanets | Caltech/IPAC under contract with NASA (Exoplanet Exploration Program) |
 | [Astronomy Picture of the Day](https://apod.nasa.gov/apod/astropix.html) | Picture of the day | Robert Nemiroff and Jerry Bonnell, hosted by NASA |
-| [CelesTrak GP data](https://celestrak.org/NORAD/documentation/gp-data-formats.php) | Spacecraft orbital elements for the coming "Sky tonight" passes | Dr. T.S. Kelso, CelesTrak (data from the US Space Force via Space-Track.org) |
+| [CelesTrak GP data](https://celestrak.org/NORAD/documentation/gp-data-formats.php) | Spacecraft orbital elements for the "Sky tonight" passes (ISS, Tiangong, Hubble) | Dr. T.S. Kelso, CelesTrak (data from the US Space Force via Space-Track.org) |
 
 **APOD images and videos belong to their credited authors**, and many are copyrighted. The dashboard shows them as NASA publishes them, always with the credit and copyright line, and links back to the entry. The page's own fonts are IBM Plex (SIL Open Font License), bundled via Fontsource. "View sky in Aladin" links open CDS's Aladin Lite.
 
@@ -119,7 +120,8 @@ Your site is then live at `https://astronomy-monitor.<your-subdomain>.workers.de
 ## Privacy
 
 - **No analytics, no tracking, no cookies, no accounts.** The page loads no third-party scripts. Fonts are self-hosted, and the Content-Security-Policy (`public/_headers`) only allows the page to call its own `/api`.
-- **Stored in your browser (`localStorage`, prefix `astronomy-monitor:v1:`):** your theme choice, and the last result of each panel, so the page isn't empty on your next visit. Nothing else is saved; Live mode and the 3D view's time and camera reset on every visit. Nothing in storage is sent anywhere, and clearing site data removes it.
+- **Stored in your browser (`localStorage`, prefix `astronomy-monitor:v1:`):** your theme choice, the last result of each panel, so the page isn't empty on your next visit, and — only if you pick one — the "Sky tonight" location, rounded to 0.01° (about 1 km). Nothing else is saved; Live mode and the 3D view's time and camera reset on every visit. Nothing in storage is sent anywhere, and clearing site data removes it.
+- **Your location (Sky tonight):** the panel never asks for it on its own; "Use my location" asks your browser only when you press it (the `Permissions-Policy` allows geolocation for this site only). The location is used only in your browser: it is not sent to this site's server, not put in the page link and not logged. The spacecraft orbits the panel downloads are the same for everyone, and all positions, times and passes are computed on your device. "Forget my location" removes it.
 - **Requests:** data requests go to this site's own Worker, which calls NASA/NOAA/JPL/STScI/CDS on your behalf, so those services don't see your IP address. The Worker uses your IP address only for a short-lived per-client rate limit, and doesn't store or log it. Cloudflare, as the host, processes requests under its own [privacy policy](https://www.cloudflare.com/privacypolicy/), and Workers Logs (enabled in `wrangler.jsonc`) keep request metadata for a few days.
 - **Loaded straight from third parties:** APOD images come directly from NASA's servers, and an APOD video plays in a sandboxed YouTube (`youtube-nocookie.com`) or Vimeo player. Those services see your IP address when that content loads. "View in Aladin" and other outbound links open the external site in a new tab.
 
@@ -160,6 +162,9 @@ src/                    browser app (TypeScript + D3 scales, no framework)
   viz/orrery-model.ts   v3: positions, distances and accuracy checks for the 3D panel (no three.js)
   viz/orrery3d.ts       v3: the three.js scene (lazy chunk; the only file that imports three)
   viz/passes.ts         v4: spacecraft passes via SGP4 (lazy chunk; the only file that imports satellite.js)
+  viz/sky-model.ts      v4: tonight's events, planet visibility, Moon orientation, sky-dome geometry (no satellite.js)
+  panels/sky.ts         v4: the "Sky tonight" panel (location picker, summary, planets, passes, sky dome)
+shared/sky.ts           v4: topocentric Sun/Moon/planets, magnitudes, rise/set and twilight (browser + tests)
   styles/               design tokens (light + dark) and layout
 public/_headers         security headers (Content-Security-Policy etc.) for the deployed site
 test/                   unit tests for the Worker normalizers (incl. a real DONKI fixture) and the orbit
@@ -180,6 +185,10 @@ test/                   unit tests for the Worker normalizers (incl. a real DONK
    - `render()` may return a view with `update(result)` to apply new data in place (live mode keeps hover, open lists and scroll position).
    - `live: [{ label, everyMs, params }]` opts a panel into live mode; `migrate()` upgrades snapshots saved by an older version.
 
+### Sky tonight: how it loads
+
+The Sun, Moon and planets need no network, so the panel shows them as soon as a location is chosen (`PanelDefinition.initial()`), without a refresh. Only the spacecraft orbits (`/api/sources/satellites`, cached 2 h) wait for a refresh press (the panel's ↻, "Refresh all", or "Load spacecraft passes"). If that request fails, the panel keeps the Sun, Moon, planets and any orbits it already had, shows the error next to the passes, and "Refresh all" counts it as failed (`PanelResult.failed`). The pass predictor (`src/viz/passes.ts` with satellite.js, a 26 kB chunk) is loaded with `import()` once there are orbits and a location. satellite.js's optional WebAssembly builds are aliased to a stub in `vite.config.ts` (they aren't used and would otherwise break the build).
+
 ### 3D Solar System: where things are
 
 - `src/panels/solarsystem.ts` — the panel: time bar (now / play / speed / slider / jump), camera views, asteroid list, details cards, links with the close-approach panel, lazy start of the 3D view, pause when off-screen or hidden, WebGL fallback. View state (time, speed, view, selection) survives a refresh but not a new visit (every visit starts at "now").
@@ -187,6 +196,8 @@ test/                   unit tests for the Worker normalizers (incl. a real DONK
 - `src/viz/orrery-model.ts` and `shared/orbit.ts` — all numbers, shared by the list, the details, the "Right now" strip and the 3D view.
 
 ## Known limitations
+
+- **Sky tonight is a prediction, not an observation.** Planet and Moon times are within about 2 minutes and positions within 0.1° (checked against JPL Horizons and USNO). Spacecraft passes are usually right to within a minute while CelesTrak's elements are fresh, but drift after an orbit boost; their brightness is a rough estimate (real spacecraft vary by a magnitude or more). Weather, buildings and light pollution aren't known to the page.
 
 - **3D Solar System positions are approximate** (see "Version 3" under Implementation notes): planets to within JPL's stated errors for its approximate elements, asteroids as two-body orbits without planetary pulls. Most close approaches match CNEOS within a few percent; objects with short arcs or old orbits can be far off, and the panel says so per object. For anything precise, use the official CNEOS numbers shown next to the estimate, or JPL Horizons.
 - **Bodies in the 3D view are dots, not to scale** (distances are); true-size spheres appear only when zoomed in close.

@@ -72,6 +72,11 @@ commands) and `TASKS.md` (state, known issues, lessons) first.
 ## Sky tonight (v4)
 - **satellite.js stays out of the main bundle.** Only `src/viz/passes.ts` may import it (a test checks);
   the panel loads that file with `import()`. Location never leaves the browser (see `docs/plans/sky-tonight.md`).
+- satellite.js 7 re-exports optional WebAssembly builds; `vite.config.ts` aliases `#wasm-single-thread` /
+  `#wasm-multi-thread` to `src/viz/satellite-no-wasm.ts`. Without that the production build fails (its
+  multi-thread build starts a Web Worker with top-level await). Only `npm run build` shows this, not the tests.
+- The panel computes the Sun, Moon and planets without a refresh (`PanelDefinition.initial()`); only
+  `/api/sources/satellites` waits for a press, and its failure stays inside the passes section (`PanelResult.failed`).
 - **CelesTrak's usage policy:** GP data updates every 2 hours; keep `maxAge` ≥ 7,200 s, one call per object
   (`CATNR` takes one number), and stop at the first non-200 answer (its "No GP data found" 404 is an answer
   about one object, not a failure). Failures are cached for 600 s (`failureMaxAge`, the exception above), so

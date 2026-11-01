@@ -10,6 +10,13 @@ export interface PanelResult<D> {
   fetchedAt: string;
   upstream: UpstreamCall[];
   notices: Notice[];
+  /**
+   * Set when this load couldn't get fresh data but the panel still has something to show (e.g. the
+   * sky panel keeps computing the Sun, Moon and planets when the spacecraft orbits fail) and shows the
+   * error itself. The header says this text, "Refresh all" counts the panel as failed, and the
+   * result isn't saved.
+   */
+  failed?: string;
 }
 
 export interface Summary {
@@ -26,6 +33,8 @@ export interface AppContext {
 /** What render() gets besides the data: the app context and a way to reload (part of) the panel. */
 export interface RenderContext extends AppContext {
   refresh(params?: Record<string, string>): void;
+  /** The panel's summary changed without new data (e.g. the visitor picked a location): redraw the "Right now" strip. */
+  notify(): void;
 }
 
 export interface ErrorAction {
@@ -84,6 +93,13 @@ export interface PanelDefinition<D> {
   migrate?(snapshot: PanelResult<unknown>): PanelResult<D> | null;
   /** Fast-changing sources refreshed automatically in live mode (opt-in, see core/live.ts). */
   live?: LiveFeed<D>[];
+  /**
+   * What the panel shows before anything was loaded or saved, when part of it needs no network (the
+   * sky panel computes the Sun, Moon and planets in the browser). Not saved; the header shows `stamp`.
+   */
+  initial?(): { result: PanelResult<D>; stamp: string };
+  /** The note above a snapshot restored from the last visit (default: "Showing the last data you loaded…"). */
+  restoredNotice?(result: PanelResult<D>): string;
 }
 
 type Listener = () => void;
@@ -100,6 +116,8 @@ export class PanelHost<D = unknown> {
   private liveError: string | null = null;
   /** The view shows a restored snapshot (with its "last data you loaded" note): never update it in place. */
   private showingRestored = false;
+  /** The view shows `def.initial()` (nothing loaded yet), with this header text. */
+  private initialStamp: string | null = null;
   result: PanelResult<D> | null = null;
   params: Record<string, string> = {};
   busy = false;
@@ -144,7 +162,22 @@ export class PanelHost<D = unknown> {
       }
       if (snap) this.show(snap, true);
     }
+    if (!this.result && def.initial) {
+      try {
+        const { result, stamp } = def.initial();
+        this.show(result, false);
+        this.initialStamp = stamp;
+        this.updateStamp();
+      } catch (err) {
+        console.error(`[${def.id}] initial view failed`, err);
+      }
+    }
     setInterval(() => this.updateStamp(), 60_000);
+  }
+
+  /** True when the panel shows only `def.initial()` (nothing loaded or restored). */
+  get isInitial(): boolean {
+    return this.initialStamp !== null;
   }
 
   onChange(fn: Listener) {
@@ -185,8 +218,9 @@ export class PanelHost<D = unknown> {
     try {
       const result = await this.def.load(controller.signal, { ...this.params, ...extraParams }, this.result);
       if (controller.signal.aborted) return this.superseded(token);
-      this.liveError = null;
+      this.liveError = result.failed ?? null;
       this.show(result, false);
+      if (result.failed) return false;
       if (this.def.persist !== false && !result.notices.some((n) => n.text.startsWith("SAMPLE DATA")) && !extraParams.sample) save(`snap:${this.def.id}`, result);
       return true;
     } catch (err) {
@@ -228,6 +262,12 @@ export class PanelHost<D = unknown> {
       if (!this.body.querySelector(".error-state")) this.stamp.textContent = "No data yet";
       return;
     }
+    if (this.initialStamp !== null) {
+      this.stamp.textContent = this.initialStamp;
+      this.stamp.classList.remove("is-stale");
+      this.stamp.removeAttribute("title");
+      return;
+    }
     const at = this.result.fetchedAt;
     const ageMs = Date.now() - new Date(at).getTime();
     this.stamp.textContent = this.liveError ?? `Updated ${localTime(at)} · ${age(at)} ago`;
@@ -262,6 +302,7 @@ export class PanelHost<D = unknown> {
       try {
         if (this.view.update(result)) {
           this.result = result;
+          this.initialStamp = null;
           this.renderFoot(result.upstream);
           this.updateStamp();
           this.emit();
@@ -274,17 +315,21 @@ export class PanelHost<D = unknown> {
     this.destroyView();
     this.result = result;
     this.showingRestored = restored;
+    this.initialStamp = null;
     clear(this.body);
     const content = h("div", { class: "panel-content" });
     const notices = [...result.notices];
-    if (restored) notices.unshift({ level: "info", text: `Showing the last data you loaded (${age(result.fetchedAt)} old). Refresh for current data.` });
+    if (restored) {
+      const text = this.def.restoredNotice?.(result) ?? `Showing the last data you loaded (${age(result.fetchedAt)} old). Refresh for current data.`;
+      notices.unshift({ level: "info", text });
+    }
     if (notices.length) {
       content.append(h("div", { class: "panel-notices" }, notices.map((n) => h("div", { class: "panel-notice", role: "status" }, n.text))));
     }
     const root = h("div");
     content.append(root);
     this.body.append(content);
-    const rctx: RenderContext = { ...this.ctx, refresh: (params = {}) => void this.refresh(params) };
+    const rctx: RenderContext = { ...this.ctx, refresh: (params = {}) => void this.refresh(params), notify: () => this.emit() };
     try {
       const out = this.def.render(root, result, rctx);
       this.view = typeof out === "function" ? { destroy: out } : (out ?? null);
