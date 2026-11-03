@@ -2524,33 +2524,32 @@ button:disabled:not(.is-busy) {
 
 /* ---------------------------------------------------------------- Sky tonight (v4) */
 
+/* .btn sets display, which beats [hidden]: the header refresh (hidden while the panel shows its own load
+   button) and the dome's "Now" (hidden while following the clock). */
+.panel-tools .btn[hidden],
+.sky-dome-when .btn[hidden] {
+  display: none;
+}
 .sky-loc {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px 16px;
-  flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.sky-loc-text {
+.sky-place {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
-  gap: 2px 12px;
-  min-width: 0;
-  color: var(--ink-2);
-  font-size: 13.5px;
+  gap: 10px;
 }
-.sky-loc-text strong {
-  color: var(--ink);
+.sky-place strong {
   font-size: 15px;
 }
-.sky-zone-warn {
-  flex-basis: 100%;
-  color: var(--ink-3);
-  font-size: 12.5px;
+.sky-change {
+  color: var(--ink-2);
+  font-size: 13px;
 }
-.sky-intro p {
+.sky-loc-meta {
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.sky-intro {
   margin: 0;
   max-width: 70ch;
   color: var(--ink-2);
@@ -2560,75 +2559,143 @@ button:disabled:not(.is-busy) {
 }
 .sky-picker {
   display: grid;
-  gap: 12px;
-  padding: 14px;
-  margin-bottom: 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--panel-2);
+  gap: 10px;
 }
-.sky-picker[hidden] {
-  display: none;
+/* Opened over a chosen place: separated from the sky below it. */
+.sky-picker.is-change {
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
 }
 .sky-picker-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 10px;
+  gap: 8px;
 }
-.sky-picker-or {
+.sky-city {
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--ink);
+  font: 500 13px var(--font-sans);
+}
+.sky-manual summary,
+.sky-howto summary,
+.sky-hidden-planets summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.sky-manual summary {
   color: var(--ink-2);
   font-size: 13px;
 }
-.sky-cities {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.sky-cities .btn[aria-pressed="true"] {
-  border-color: var(--ink);
-  box-shadow: inset 0 -2px 0 var(--ink);
-}
 .sky-coords {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  max-width: 420px;
 }
 .sky-coords label {
   color: var(--ink-2);
   font-size: 13px;
 }
-.sky-coord-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+.sky-coord-row {
+  display: flex;
+  gap: 6px;
 }
-.sky-coord-field label {
-  min-width: 64px;
-}
-.sky-coord {
-  display: inline-flex;
-}
-.sky-num,
-.sky-hemi {
+.sky-coord-input {
+  flex: 1;
+  min-width: 0;
   height: 30px;
+  padding: 0 8px;
   border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
   background: var(--panel);
   color: var(--ink);
   font: 400 16px/1 var(--font-mono); /* 16px: iOS zooms the page on focus below that */
 }
-.sky-num {
-  width: 92px;
-  padding: 0 8px;
-  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+.sky-coord-input[aria-invalid="true"] {
+  border-color: var(--ink);
 }
-.sky-hemi {
-  padding: 0 4px;
-  border-left: 0;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  font-family: var(--font-sans);
-  font-size: 14px;
+.sky-coords-hint {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.sky-privacy {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+.sky-dome-head {
+  align-items: center;
+  min-height: 30px;
+}
+.sky-dome-when {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sky-dome-time {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.sky-slider-wrap {
+  margin-top: 6px;
+}
+.sky-slider {
+  width: 100%;
+  margin: 8px 0 0;
+  accent-color: var(--ink);
+}
+.rank-list li.sky-hidden-row {
+  display: block;
+}
+.sky-hidden-planets > summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  align-items: baseline;
+  width: auto;
+}
+.sky-hidden-planets > summary .name {
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.sky-hidden-planets > .rank-list {
+  margin-top: 4px;
+}
+.sky-howto {
+  margin-top: 16px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.sky-howto summary {
+  color: var(--ink);
+  font-weight: 500;
+}
+.sky-howto h4 {
+  margin: 12px 0 2px;
+  color: var(--ink);
+  font: 600 13px/1.3 var(--font-sans);
+}
+.sky-howto p {
+  margin: 0;
+  max-width: 80ch;
+}
+
+.sky-zone-warn {
+  flex-basis: 100%;
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+.sky-picker[hidden] {
+  display: none;
 }
 .sky-picker-status {
   margin: 0;
@@ -2637,11 +2704,6 @@ button:disabled:not(.is-busy) {
 }
 .sky-picker-status:empty {
   display: none;
-}
-.sky-privacy {
-  margin: 0;
-  color: var(--ink-3);
-  font-size: 12.5px;
 }
 .sky-polar {
   margin: 0 0 12px;
@@ -2663,11 +2725,6 @@ button:disabled:not(.is-busy) {
 }
 .sky-dome-block {
   min-width: 0;
-}
-.sky-dome-time {
-  margin: 0;
-  color: var(--ink-2);
-  font-size: 13px;
 }
 .sky-dome {
   display: block;
@@ -2763,27 +2820,8 @@ button:disabled:not(.is-busy) {
   color: var(--ink-2);
   font-size: 12.5px;
 }
-.sky-time {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-top: 10px;
-}
-.sky-time .btn[aria-pressed="true"] {
-  border-color: var(--ink);
-  box-shadow: inset 0 -2px 0 var(--ink);
-}
-.sky-slider-wrap {
-  flex: 1;
-  min-width: 0;
-}
 .sky-slider-track {
   position: relative;
-}
-.sky-slider {
-  width: 100%;
-  margin: 8px 0 0;
-  accent-color: var(--ink);
 }
 .sky-slider.is-outside {
   opacity: 0.45;
@@ -2806,11 +2844,6 @@ button:disabled:not(.is-busy) {
   gap: 8px;
   color: var(--ink-3);
   font-size: 12px;
-}
-.sky-dome-note {
-  margin: 8px 0 0;
-  color: var(--ink-3);
-  font-size: 12.5px;
 }
 .sky-side {
   display: grid;
@@ -2924,9 +2957,6 @@ button.sky-pass[aria-pressed="true"] {
   margin: 6px 0;
   font-size: 13px;
 }
-.sky-honesty {
-  margin-top: 18px;
-}
 
 @media (max-width: 860px) {
   .sky-layout {
@@ -2936,8 +2966,5 @@ button.sky-pass[aria-pressed="true"] {
 @media (max-width: 640px) {
   .sky-stats .stat {
     flex-basis: 40%;
-  }
-  .sky-picker {
-    padding: 12px;
   }
 }

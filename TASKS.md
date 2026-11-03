@@ -32,6 +32,8 @@ ultrareview fixes (see PR 2 below).
 **2026-11-01 (v4, PR 3 of 3):** the "Sky tonight" panel (`src/panels/sky.ts`, after APOD): location picker,
 tonight's events, Moon, planets, spacecraft passes, sky dome, "Right now" summary. 182 unit tests pass. Not deployed
 yet (see PR 3 below for what was and wasn't verified).
+**2026-11-03 (v4, PR 3 layout pass):** the sky panel simplified without removing features (see "PR 3 layout pass"
+below). 188 unit tests pass.
 **2026-11-01 (v4, PR 3 review fixes):** nine fixes from the maintainer's review, incl. CelesTrak requests in parallel
 (see "PR 3 review fixes" below). 187 unit tests pass.
 
@@ -177,7 +179,37 @@ yet (see PR 3 below for what was and wasn't verified).
 - `npm run check` passes (187 tests); production preview re-checked at 360 px light, 375 px dark and 1280 px, no
   horizontal scroll, no console errors.
 
+## PR 3 layout pass (2026-11-03)
+The maintainer found the panel cluttered, especially on phones. Same features, fewer controls:
+1. **Location picker**: one primary "Use my location" button and a "Choose a city…" `<select>` (was six buttons).
+   Coordinates sit behind an "Enter coordinates" disclosure as **one text field** (`parseLatLon` in
+   `src/viz/sky-model.ts`; replaces the two number fields and the N/S, E/W selects). It reads "-33.87, 151.21"
+   as Google Maps copies it, "33.87 S, 151.21 E", "33.87°S 151.21°E", "S 33.87 E 151.21", "151.21 E, 33.87 S" (letters say
+   which is which) and decimal commas when the numbers are separated by a space or semicolon. The sign rule stays:
+   a typed sign wins, else the letter, else north/east. Out-of-range and unreadable input get a message and
+   `aria-invalid`. Tests replaced (`coordinateFromInput`, `typedSign`, `defaultHemispheres` are gone with the
+   selects). The field is prefilled Google-Maps style for a manual location. Privacy note is one line
+   ("Your location stays in this browser (rounded to about 1 km).") with "Forget it".
+2. **One load button**: the passes section keeps "Load spacecraft passes" (and "Try again" after a failure; it shows
+   "Loading…" while busy). While it shows, the header ↻ is hidden through a new `RenderContext.setRefreshVisible()`
+   (`PanelHost` resets it on every render and on errors); it returns once orbits are loaded. With no location chosen
+   the header ↻ stays (no other button then). Checked in every state: exactly one of them visible.
+3. "Change location" is a small text link ("Change" / "Close") next to the place name.
+4. The dome's "Now" sits beside the shown time and appears only when the dome is away from now (> 1 min); pressing it
+   moves focus to the slider. `.btn` sets `display`, so `[hidden]` needed explicit CSS for it and the header ↻.
+5. **"How to read this"** (`<details>`, closed by default, remembered for the visit): the dome explanation, the planet
+   visibility rule, the spacecraft note (pass criteria, spells, low-inclination orbits, the download happens only on
+   a press, element epochs and age) and the accuracy footnote. The empty-pass state keeps one sentence.
+6. **Planets not visible tonight** share one collapsed row ("Not visible tonight: Mercury and Venus"); opened, each
+   says why. The "Visible"/"Not visible" tags are gone (the grouping says it).
+- Verified on the production preview (Playwright Chromium, orbits from the PR 2 fixture): 375 px light and dark,
+  360 px light (no location; Tromsø with every disclosure open) and dark, 1280 px light (Jakarta) and dark (typed
+  coordinates, orbits failing); no horizontal scroll, no console errors; the coordinate field with both formats,
+  an unreadable and an out-of-range input; the city select and the Change link.
+
 ## Lessons learned (v4, PR 3)
+- **`[hidden]` doesn't hide a `.btn`**: the class sets `display`, which wins. Add a `[hidden]` rule wherever a
+  button is hidden that way (the first screenshots still showed "Now" while following the clock).
 - **Test against the code you are fixing**: the hidden-tab new-night check was run once against the previous
   `sky.ts` to confirm it fails there.
 - **`vite preview` serves the build it started with**: restart it after `npm run build` (already noted for v3), or

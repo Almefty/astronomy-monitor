@@ -401,39 +401,60 @@ export function utcOffsetLabel(ms: number, tz: string): string {
   return `UTC${off < 0 ? "−" : "+"}${Math.floor(a / 60)}${a % 60 ? `:${String(a % 60).padStart(2, "0")}` : ""}`;
 }
 
-/** Parse a coordinate typed by a visitor ("−6.2", "6,2"), or NaN. */
-export function parseCoordinate(text: string): number {
-  const t = normalizeCoordinate(text);
-  return /^[-+]?\d{1,3}(\.\d+)?$/.test(t) ? Number(t) : NaN;
-}
+/** Lexemes of the coordinate field: a hemisphere letter, a signed number, or a separator (° , ;). */
+const COORD_LEXEME = /\s*(?:([NSEW])|([-+]?\d{1,3}(?:[.,]\d+)?)|([°,;]))\s*/iy;
 
-function normalizeCoordinate(text: string): string {
-  return text.trim().replace(/[−–]/g, "-").replace(",", ".").replace(/°$/, "");
-}
+export type LatLonResult = { ok: true; lat: number; lon: number } | { ok: false; error: string };
 
-/** +1 = north/east, −1 = south/west (the value of the hemisphere selects in the picker). */
-export type Hemisphere = 1 | -1;
-
-/** The sign typed in a coordinate field ("−33.9" → −1, "+18" → 1), or null when there is none. */
-export function typedSign(text: string): Hemisphere | null {
-  const t = normalizeCoordinate(text);
-  return t.startsWith("-") ? -1 : t.startsWith("+") ? 1 : null;
-}
+const LATLON_HINT = "Enter latitude and longitude, for example -33.87, 151.21 or 33.87 S, 151.21 E.";
 
 /**
- * A coordinate from the picker's number field and its N/S (or E/W) select. One rule: a typed sign
- * wins (and the select should be switched to match, `hemi`); without one, the select decides.
- * "-33.87" with S is 33.87° S, not N. `value` is NaN when the text isn't a number.
+ * Latitude and longitude typed (or pasted) into the picker's one text field, degrees:
+ * "-33.87, 151.21" (as Google Maps copies it), "33.87 S, 151.21 E", "33.87°S 151.21°E", "S 33.87 E 151.21",
+ * "151.21 E, 33.87 S" (letters say which is which). Letters go all after or all before the numbers
+ * (decided by whether the text starts with one). Decimal commas work when the numbers are separated by a
+ * space or semicolon ("6,2; 106,8").
+ * One sign rule per number: a typed sign (−, +) wins; without one the letter decides (S, W negative);
+ * with neither it is north or east. Out-of-range values are rejected with a message for the visitor.
  */
-export function coordinateFromInput(text: string, select: Hemisphere): { value: number; hemi: Hemisphere } {
-  const v = parseCoordinate(text);
-  const sign = typedSign(text);
-  return sign === null ? { value: Math.abs(v) * select, hemi: select } : { value: v, hemi: sign };
+export function parseLatLon(text: string): LatLonResult {
+  const s = text.replace(/[−–]/g, "-").trim();
+  const lex: ({ kind: "letter"; v: string } | { kind: "num"; v: string })[] = [];
+  COORD_LEXEME.lastIndex = 0;
+  while (COORD_LEXEME.lastIndex < s.length) {
+    const m = COORD_LEXEME.exec(s);
+    if (!m) return { ok: false, error: LATLON_HINT };
+    if (m[1]) lex.push({ kind: "letter", v: m[1].toUpperCase() });
+    else if (m[2]) lex.push({ kind: "num", v: m[2] });
+  }
+  const prefix = lex[0]?.kind === "letter";
+  const tokens: { value: number; axis: "lat" | "lon" | null }[] = [];
+  for (let k = 0; k < lex.length; ) {
+    let letter: string | null = null;
+    if (prefix) {
+      if (lex[k]?.kind !== "letter") return { ok: false, error: LATLON_HINT };
+      letter = lex[k++]!.v;
+    }
+    const n = lex[k++];
+    if (n?.kind !== "num") return { ok: false, error: LATLON_HINT };
+    if (!prefix && lex[k]?.kind === "letter") letter = lex[k++]!.v;
+    const raw = Number(n.v.replace(",", "."));
+    const value = /^[-+]/.test(n.v) || !letter ? raw : letter === "S" || letter === "W" ? -raw : raw;
+    tokens.push({ value, axis: letter === null ? null : letter === "N" || letter === "S" ? "lat" : "lon" });
+  }
+  if (tokens.length !== 2) return { ok: false, error: LATLON_HINT };
+  let [a, b] = tokens as [(typeof tokens)[number], (typeof tokens)[number]];
+  // Letters say which number is which; otherwise latitude comes first.
+  if (a.axis === "lon" || b.axis === "lat") [a, b] = [b, a];
+  if (a.axis === "lon" || b.axis === "lat") return { ok: false, error: "Use N or S for the latitude and E or W for the longitude." };
+  if (!(Math.abs(a.value) <= 90)) return { ok: false, error: "Latitude must be between 90° S and 90° N." };
+  if (!(Math.abs(b.value) <= 180)) return { ok: false, error: "Longitude must be between 180° W and 180° E." };
+  return { ok: true, lat: a.value, lon: b.value };
 }
 
-/** The picker's hemisphere selects: the saved location's, else north and east. */
-export function defaultHemispheres(loc: { lat: number; lon: number } | null): { lat: Hemisphere; lon: Hemisphere } {
-  return { lat: loc && loc.lat < 0 ? -1 : 1, lon: loc && loc.lon < 0 ? -1 : 1 };
+/** A location as the text field shows it, Google Maps style: "-33.87, 151.21". */
+export function formatLatLonInput(lat: number, lon: number): string {
+  return `${lat.toFixed(2)}, ${lon.toFixed(2)}`;
 }
 
 /**

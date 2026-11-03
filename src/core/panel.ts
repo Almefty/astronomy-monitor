@@ -35,6 +35,11 @@ export interface RenderContext extends AppContext {
   refresh(params?: Record<string, string>): void;
   /** The panel's summary changed without new data (e.g. the visitor picked a location): redraw the "Right now" strip. */
   notify(): void;
+  /**
+   * Show or hide the header's refresh button, for a panel that shows its own button for the same action
+   * (the sky panel's "Load spacecraft passes"), so the view never has two. Reset to shown on every render.
+   */
+  setRefreshVisible(visible: boolean): void;
 }
 
 export interface ErrorAction {
@@ -287,6 +292,7 @@ export class PanelHost<D = unknown> {
   }
 
   private destroyView() {
+    this.refreshBtn.hidden = false; // a view may have hidden it (setRefreshVisible)
     try {
       this.view?.destroy?.();
     } catch (err) {
@@ -329,7 +335,12 @@ export class PanelHost<D = unknown> {
     const root = h("div");
     content.append(root);
     this.body.append(content);
-    const rctx: RenderContext = { ...this.ctx, refresh: (params = {}) => void this.refresh(params), notify: () => this.emit() };
+    const rctx: RenderContext = {
+      ...this.ctx,
+      refresh: (params = {}) => void this.refresh(params),
+      notify: () => this.emit(),
+      setRefreshVisible: (visible) => (this.refreshBtn.hidden = !visible),
+    };
     try {
       const out = this.def.render(root, result, rctx);
       this.view = typeof out === "function" ? { destroy: out } : (out ?? null);

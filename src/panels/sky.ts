@@ -12,8 +12,8 @@ import { load as loadStored, remove as removeStored, save as saveStored } from "
 // Types only: satellite.js (inside passes.ts) is loaded with import() when there is something to predict.
 import type { PassPrediction, VisiblePass } from "../viz/passes";
 import {
-  coordinateFromInput, dayLabel, defaultHemispheres, fmtMag, formatCoords, GLARE_ELONGATION, hhmm, LOCATION_KEY, parseLocation, passTimes,
-  solarOffsetHours, typedSign, utcOffsetLabel, type Hemisphere, type SkyLocation,
+  dayLabel, fmtMag, formatCoords, formatLatLonInput, GLARE_ELONGATION, hhmm, LOCATION_KEY, parseLatLon, parseLocation, passTimes,
+  solarOffsetHours, utcOffsetLabel, type SkyLocation,
   BODY_NAMES, computeTonight, DARK_SUN_ALT, domeAngle, domePoint, MIN_PLANET_ALT, moonLitBearing, NAKED_EYE_MAG, nightSentences,
   skyBearing, skyState, SKY_STATE_TEXT, whereInSky, type AltAz, type Interval, type PlanetTonight, type RiseSet, type Tonight,
 } from "../viz/sky-model";
@@ -56,6 +56,9 @@ const view = {
   passKey: null as string | null,
   showAllPasses: false,
   pickerOpen: false,
+  /** "How to read this" and "Not visible tonight" stay open across re-renders once opened. */
+  howToOpen: false,
+  hiddenPlanetsOpen: false,
 };
 
 /** Bumped whenever a location is chosen or forgotten, so a late geolocation answer can tell it was overtaken. */
@@ -181,6 +184,13 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
 
   /* ---------- Location row and picker */
 
+  function togglePicker() {
+    view.pickerOpen = !view.pickerOpen;
+    buildLocation();
+    buildPicker();
+    if (view.pickerOpen) picker.querySelector<HTMLElement>("button, select")?.focus();
+  }
+
   function buildLocation() {
     const loc = view.loc;
     clear(locRow);
@@ -193,33 +203,26 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       const solarOffsetH = solarOffsetHours(loc.lon, timeZoneOffset(Date.now(), tz));
       const change = h(
         "button",
-        { type: "button", class: "btn btn-small", "aria-expanded": String(view.pickerOpen), "aria-controls": "sky-picker" },
-        icon(ICONS.pin),
-        view.pickerOpen ? "Close" : "Change location",
+        { type: "button", class: "linklike sky-change", "aria-expanded": String(view.pickerOpen), "aria-controls": "sky-picker" },
+        view.pickerOpen ? "Close" : "Change",
       );
-      change.addEventListener("click", () => {
-        view.pickerOpen = !view.pickerOpen;
-        buildLocation();
-        buildPicker();
-        if (view.pickerOpen) picker.querySelector<HTMLElement>("button, input")?.focus();
-      });
+      change.addEventListener("click", togglePicker);
       locRow.append(
         h(
           "div",
           { class: "sky-loc-text" },
-          h("strong", null, loc.name ?? (loc.kind === "device" ? "Your location" : "Chosen coordinates")),
-          h("span", { class: "mono" }, formatCoords(loc.lat, loc.lon)),
-          h("span", null, zoneText),
-          Math.abs(solarOffsetH) > 3 ? h("span", { class: "sky-zone-warn" }, "This place is far from that time zone; times are still shown in it.") : null,
+          h("div", { class: "sky-place" }, h("strong", null, loc.name ?? (loc.kind === "device" ? "Your location" : "Chosen coordinates")), change),
+          h("div", { class: "sky-loc-meta" }, h("span", { class: "mono" }, formatCoords(loc.lat, loc.lon)), " · ", zoneText),
+          Math.abs(solarOffsetH) > 3 ? h("div", { class: "sky-zone-warn" }, "This place is far from that time zone; times are still shown in it.") : null,
         ),
-        change,
       );
     } else {
       locRow.append(
         h(
-          "div",
+          "p",
           { class: "sky-intro" },
-          h("p", null, h("strong", null, "Where are you looking from? "), "Pick a place to see when it gets dark, the Moon, which planets are up and when the ISS, Tiangong and Hubble pass over."),
+          h("strong", null, "Where are you looking from? "),
+          "Pick a place to see when it gets dark, the Moon, the planets and passes of the ISS, Tiangong and Hubble.",
         ),
       );
     }
@@ -228,10 +231,11 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
   function buildPicker() {
     clear(picker);
     picker.hidden = !!view.loc && !view.pickerOpen;
+    picker.classList.toggle("is-change", !!view.loc);
     if (picker.hidden) return;
     const status = h("p", { class: "sky-picker-status", role: "status", "aria-live": "polite" });
 
-    const geoBtn = h("button", { type: "button", class: "btn btn-small" }, icon(ICONS.pin), "Use my location");
+    const geoBtn = h("button", { type: "button", class: "btn btn-primary btn-small" }, icon(ICONS.pin), "Use my location");
     if (!("geolocation" in navigator) || !window.isSecureContext) {
       geoBtn.disabled = true;
       geoBtn.title = "Your browser doesn’t offer location here";
@@ -253,7 +257,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
           const obs = toObserver(pos.coords.latitude, pos.coords.longitude);
           if (!obs) {
             geoIdle();
-            status.textContent = "Your browser returned an unusable position. Pick a city or enter coordinates instead.";
+            status.textContent = "Your browser returned an unusable position. Choose a city or enter coordinates instead.";
             return;
           }
           setLocation({ kind: "device", name: null, lat: obs.lat, lon: obs.lon, timeZone: null });
@@ -263,83 +267,63 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
           geoIdle();
           status.textContent =
             err.code === err.PERMISSION_DENIED
-              ? "Location access was refused. Pick a city or enter coordinates instead."
+              ? "Location access was refused. Choose a city or enter coordinates instead."
               : err.code === err.TIMEOUT
-                ? "Finding your location took too long. Try again, or pick a city or enter coordinates."
-                : "Your device couldn’t determine its location. Pick a city or enter coordinates instead.";
+                ? "Finding your location took too long. Try again, or choose a city or enter coordinates."
+                : "Your device couldn’t determine its location. Choose a city or enter coordinates instead.";
         },
         { enableHighAccuracy: false, timeout: 20_000, maximumAge: 10 * MINUTE },
       );
     });
 
-    const cities = h("div", { class: "sky-cities", role: "group", "aria-label": "Cities" });
-    for (const p of PRESET_PLACES) {
-      const b = h("button", { type: "button", class: "btn btn-small", "aria-pressed": String(view.loc?.kind === "preset" && view.loc.name === p.name) }, p.name);
-      b.addEventListener("click", () => setLocation({ kind: "preset", name: p.name, lat: p.lat, lon: p.lon, timeZone: p.timeZone }));
-      cities.append(b);
-    }
+    const city = h(
+      "select",
+      { class: "sky-city", "aria-label": "Choose a city" },
+      h("option", { value: "" }, "Choose a city…"),
+      PRESET_PLACES.map((p) => h("option", { value: p.name }, p.name)),
+    );
+    city.value = view.loc?.kind === "preset" && PRESET_PLACES.some((p) => p.name === view.loc!.name) ? view.loc.name! : "";
+    city.addEventListener("change", () => {
+      const p = PRESET_PLACES.find((x) => x.name === city.value);
+      if (p) setLocation({ kind: "preset", name: p.name, lat: p.lat, lon: p.lon, timeZone: p.timeZone });
+    });
 
-    // Coordinates: a number plus a hemisphere, so phones' decimal keypads (no minus key) work.
+    // Coordinates: one text field, behind a disclosure (see parseLatLon for what it reads).
     const cur = view.loc;
-    const latIn = h("input", { type: "text", inputmode: "decimal", autocomplete: "off", id: "sky-lat", class: "sky-num", placeholder: "6.20", value: cur ? Math.abs(cur.lat).toFixed(2) : "" });
-    const lonIn = h("input", { type: "text", inputmode: "decimal", autocomplete: "off", id: "sky-lon", class: "sky-num", placeholder: "106.80", value: cur ? Math.abs(cur.lon).toFixed(2) : "" });
-    const hemi = (id: string, a: string, b: string, neg: boolean, label: string) => {
-      const sel = h("select", { id, class: "sky-hemi", "aria-label": label }, h("option", { value: "1" }, a), h("option", { value: "-1" }, b));
-      sel.value = neg ? "-1" : "1";
-      return sel;
-    };
-    const hemis = defaultHemispheres(cur);
-    const latHemi = hemi("sky-lat-h", "N", "S", hemis.lat < 0, "North or south");
-    const lonHemi = hemi("sky-lon-h", "E", "W", hemis.lon < 0, "East or west");
-    // A typed sign wins: switch the select to match as soon as it's typed (see coordinateFromInput).
-    for (const [input, sel] of [[latIn, latHemi], [lonIn, lonHemi]] as const) {
-      input.addEventListener("input", () => {
-        const sign = typedSign(input.value);
-        if (sign !== null) sel.value = String(sign);
-      });
-    }
+    const coordIn = h("input", {
+      type: "text", autocomplete: "off", spellcheck: "false", id: "sky-coords", class: "sky-coord-input",
+      placeholder: "-33.87, 151.21", value: cur?.kind === "manual" ? formatLatLonInput(cur.lat, cur.lon) : "",
+      "aria-describedby": "sky-coords-hint",
+    });
     const form = h(
       "form",
       { class: "sky-coords", novalidate: true },
-      h("span", { class: "sky-coord-field" }, h("label", { for: "sky-lat" }, "Latitude"), h("span", { class: "sky-coord" }, latIn, latHemi)),
-      h("span", { class: "sky-coord-field" }, h("label", { for: "sky-lon" }, "Longitude"), h("span", { class: "sky-coord" }, lonIn, lonHemi)),
-      h("button", { type: "submit", class: "btn btn-small" }, "Show this place"),
+      h("label", { for: "sky-coords" }, "Latitude, longitude"),
+      h("span", { class: "sky-coord-row" }, coordIn, h("button", { type: "submit", class: "btn btn-small" }, "Show")),
+      h("span", { class: "sky-coords-hint", id: "sky-coords-hint" }, "As copied from a map (-33.87, 151.21) or with letters (33.87 S, 151.21 E)."),
     );
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
-      const latC = coordinateFromInput(latIn.value, Number(latHemi.value) as Hemisphere);
-      const lonC = coordinateFromInput(lonIn.value, Number(lonHemi.value) as Hemisphere);
-      latHemi.value = String(latC.hemi);
-      lonHemi.value = String(lonC.hemi);
-      const lat = latC.value, lon = lonC.value;
-      if (!(Math.abs(lat) <= 90)) {
-        status.textContent = "Latitude must be a number from 0 to 90 (degrees north or south).";
-        latIn.focus();
+      const r = parseLatLon(coordIn.value);
+      if (!r.ok) {
+        status.textContent = r.error;
+        coordIn.setAttribute("aria-invalid", "true");
+        coordIn.focus();
         return;
       }
-      if (!(Math.abs(lon) <= 180)) {
-        status.textContent = "Longitude must be a number from 0 to 180 (degrees east or west).";
-        lonIn.focus();
-        return;
-      }
-      setLocation({ kind: "manual", name: null, lat: roundCoordinate(lat), lon: roundCoordinate(lon), timeZone: null });
+      setLocation({ kind: "manual", name: null, lat: roundCoordinate(r.lat), lon: roundCoordinate(r.lon), timeZone: null });
     });
+    coordIn.addEventListener("input", () => coordIn.removeAttribute("aria-invalid"));
+    const manual = h("details", { class: "sky-manual" }, h("summary", null, "Enter coordinates"), form);
+    if (cur?.kind === "manual") manual.open = true;
 
-    picker.append(
-      h("div", { class: "sky-picker-row" }, geoBtn, h("span", { class: "sky-picker-or" }, "or a city:"), cities),
-      form,
-      status,
-      h(
-        "p",
-        { class: "sky-privacy" },
-        "Your location stays in this browser: it isn’t sent to the server or put in the page link. It is saved here, rounded to 0.01° (about 1 km), so the panel remembers it.",
-      ),
-    );
+    const privacy = h("p", { class: "sky-privacy" }, "Your location stays in this browser (rounded to about 1 km).");
     if (view.loc) {
-      const forget = h("button", { type: "button", class: "linklike" }, "Forget my location");
+      const forget = h("button", { type: "button", class: "linklike" }, "Forget it");
       forget.addEventListener("click", () => setLocation(null));
-      picker.lastElementChild!.append(" ", forget);
+      privacy.append(" ", forget);
     }
+    picker.append(h("div", { class: "sky-picker-row" }, geoBtn, city), manual, status, privacy);
   }
 
   /* ---------- Content */
@@ -350,6 +334,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
     ticker.passes = null;
     ticker.dome = null;
     hideTip();
+    ctx.setRefreshVisible(true);
     buildLocation();
     buildPicker();
     clear(content);
@@ -376,12 +361,13 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
     const planetBox = h("section", { class: "sky-section", "aria-labelledby": "sky-planets-h" });
     const passBox = h("section", { class: "sky-section", "aria-labelledby": "sky-passes-h" });
     content.append(h("div", { class: "sky-layout" }, domeBox, h("div", { class: "sky-side" }, planetBox, passBox)));
-    content.append(footnote());
+    const epochs = h("span");
+    content.append(howTo(epochs));
 
     const dome = domeView(domeBox, tonight, obs, tz);
     ticker.dome = dome;
     planetList(planetBox, tonight, tz);
-    passSection(passBox, tonight, obs, tz, dome);
+    passSection(passBox, tonight, obs, tz, dome, epochs);
   }
 
   function statsRow(t: Tonight, tz: string, obs: Observer, now: number): HTMLElement {
@@ -429,19 +415,26 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
   }
 
   function planetList(box: HTMLElement, t: Tonight, tz: string) {
-    box.append(
-      h("h3", { class: "section-title", id: "sky-planets-h" }, "Planets tonight"),
-      h(
-        "ul",
-        { class: "rank-list sky-planets" },
-        t.planets.map((p) => planetRow(p, tz)),
-      ),
-    );
+    const visible = t.planets.filter((p) => p.status === "visible");
+    const hidden = t.planets.filter((p) => p.status !== "visible");
+    const list = h("ul", { class: "rank-list sky-planets" }, visible.map((p) => planetRow(p, tz)));
+    if (hidden.length) {
+      // The planets that can't be seen tonight share one collapsed row; each says why inside.
+      const det = h(
+        "details",
+        { class: "sky-hidden-planets" },
+        h("summary", null, h("span", { class: "name" }, visible.length ? "Not visible tonight: " : "No planet is visible tonight: "), h("span", { class: "sub" }, listText(hidden.map((p) => p.name)))),
+        h("ul", { class: "rank-list sky-planets" }, hidden.map((p) => planetRow(p, tz))),
+      );
+      det.open = view.hiddenPlanetsOpen;
+      det.addEventListener("toggle", () => (view.hiddenPlanetsOpen = det.open));
+      list.append(h("li", { class: "sky-hidden-row" }, det));
+    }
+    box.append(h("h3", { class: "section-title", id: "sky-planets-h" }, "Planets tonight"), list);
   }
 
   function planetRow(p: PlanetTonight, tz: string): HTMLElement {
     const visible = p.status === "visible";
-    const tag = h("span", { class: "status-tag", style: `--tag:${visible ? "var(--series-1)" : "var(--other)"}` }, visible ? "Visible" : "Not visible");
     const rs = p.rs.state === "always-up" ? "up all night" : p.rs.state === "never-up" ? "" : riseSetText(p.rs, tz, " · ");
     let sub: string;
     if (visible && p.best) {
@@ -453,7 +446,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
     return h(
       "li",
       { class: visible ? "" : "is-dim" },
-      h("span", { class: "name" }, p.name, " ", tag),
+      h("span", { class: "name" }, p.name),
       h("span", { class: "sub" }, sub),
       h("span", { class: "value" }, p.mag === null ? "—" : fmtMag(p.mag), h("small", null, faint ? "mag · binoculars" : "mag")),
     );
@@ -473,25 +466,15 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
     const heading = h("p", { class: "sky-dome-time mono" });
     const sunText = h("p", { class: "sky-dome-sun" });
     const svg = s("svg", { class: "sky-dome", viewBox: `0 0 ${SIZE} ${SIZE}`, role: "img" });
-    const nowBtn = h("button", { type: "button", class: "btn btn-small", title: "Show the sky right now and follow the clock" }, icon(ICONS.now), "Now");
+    const nowBtn = h("button", { type: "button", class: "btn btn-small sky-now", title: "Show the sky right now and follow the clock" }, icon(ICONS.now), "Now");
     const slider = h("input", { type: "range", class: "sky-slider", step: String(MINUTE), "aria-label": "Time shown on the sky dome" });
     const startLbl = h("span", { class: "mono" }), endLbl = h("span", { class: "mono" });
     const nowTick = h("span", { class: "sky-slider-now", "aria-hidden": "true" });
     box.append(
-      h("div", { class: "chart-head" }, h("h3", null, "Your sky"), heading),
+      h("div", { class: "chart-head sky-dome-head" }, h("h3", null, "Your sky"), h("div", { class: "sky-dome-when" }, heading, nowBtn)),
       svg,
       sunText,
-      h(
-        "div",
-        { class: "sky-time" },
-        nowBtn,
-        h("div", { class: "sky-slider-wrap" }, h("div", { class: "sky-slider-track" }, slider, nowTick), h("div", { class: "sky-slider-ends" }, startLbl, endLbl)),
-      ),
-      h(
-        "p",
-        { class: "sky-dome-note" },
-        "Zenith in the centre, horizon at the edge. North is up and east is on the left: the sky as you see it lying on your back with your head to the north. Dots are sized by brightness; open circles need binoculars. Drag the slider or use the arrow keys (Shift for 1-minute steps).",
-      ),
+      h("div", { class: "sky-slider-wrap" }, h("div", { class: "sky-slider-track" }, slider, nowTick), h("div", { class: "sky-slider-ends" }, startLbl, endLbl)),
     );
 
     let night = tonight;
@@ -520,7 +503,8 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       const now = Date.now();
       nowTick.hidden = now < a || now > b;
       nowTick.style.left = `${((now - a) / (b - a)) * 100}%`;
-      nowBtn.setAttribute("aria-pressed", String(view.ms === null));
+      // "Now" only when the dome shows another time (it follows the clock otherwise).
+      nowBtn.hidden = view.ms === null || Math.abs(t - now) < MINUTE;
     };
 
     slider.addEventListener("input", () => {
@@ -541,6 +525,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       view.ms = null;
       view.domeNight = null;
       draw();
+      slider.focus(); // the button disappears; keep the keyboard on the time control
     });
 
     const mark = (p: AltAz, title: string, rows: [string, string][], node: SVGElement, hitR = 12) => {
@@ -693,15 +678,26 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
 
   /* ---------- Passes */
 
-  function passSection(box: HTMLElement, tonight: Tonight, obs: Observer, tz: string, dome: Dome) {
+  function passSection(box: HTMLElement, tonight: Tonight, obs: Observer, tz: string, dome: Dome, epochsSlot: HTMLElement) {
     const head = h("div", { class: "chart-head" }, h("h3", { class: "section-title", id: "sky-passes-h" }, "Spacecraft passes"));
     const body = h("div", { class: "sky-passes" });
     box.append(head, body);
     const { satellites, error } = result.data;
+    /** The section's own button for loading the orbits: while it shows, the header's ↻ (same action) is hidden. */
+    const loadButton = (label: string) => {
+      const b = h("button", { type: "button", class: "btn btn-small" }, icon(ICONS.refresh), label);
+      b.addEventListener("click", () => {
+        b.disabled = true;
+        b.classList.add("is-busy");
+        b.lastChild!.textContent = "Loading…";
+        ctx.refresh();
+      });
+      ctx.setRefreshVisible(false);
+      return b;
+    };
 
     if (error) {
-      const retry = h("button", { type: "button", class: "btn btn-small" }, icon(ICONS.refresh), "Try again");
-      retry.addEventListener("click", () => ctx.refresh());
+      const retry = loadButton("Try again");
       body.append(
         h(
           "div",
@@ -713,12 +709,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
     }
     if (!satellites) {
       if (!error) {
-        const loadBtn = h("button", { type: "button", class: "btn btn-small" }, icon(ICONS.refresh), "Load spacecraft passes");
-        loadBtn.addEventListener("click", () => ctx.refresh());
-        body.append(
-          h("p", { class: "sky-note" }, "Passes of the ISS, Tiangong and Hubble need their latest orbits from CelesTrak (a small download, only when you press a button). The Sun, Moon and planets above need nothing."),
-          loadBtn,
-        );
+        body.append(h("p", { class: "sky-note" }, "When the ISS, Tiangong and Hubble pass over: needs their latest orbits (a small download)."), loadButton("Load spacecraft passes"));
       }
       return;
     }
@@ -727,6 +718,10 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       return;
     }
 
+    const fillEpochs = () => {
+      const ep = satellites.satellites.map((x) => Date.parse(x.epoch));
+      epochsSlot.textContent = ` These orbits are CelesTrak’s from ${utc(new Date(Math.min(...ep)))}${ep.length > 1 ? ` – ${utc(new Date(Math.max(...ep)))}` : ""}, loaded ${age(result.fetchedAt)} ago.`;
+    };
     const status = h("p", { class: "sky-note", role: "status" }, "Computing passes…");
     const list = h("div");
     body.append(status, list);
@@ -740,7 +735,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
         const now = Date.now();
         const upcoming = pred.passes.filter((p) => p.end.ms > now);
         dome.setPasses(upcoming);
-        renderPasses(list, pred, upcoming, tonight, obs, tz, dome, draw);
+        renderPasses(list, pred, upcoming, tonight, obs, tz, draw);
       };
       draw();
       ticker.passes = draw;
@@ -748,6 +743,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
 
     if (passCache?.key === key) {
       show(passCache.prediction);
+      fillEpochs();
       return;
     }
     loadPasses()
@@ -764,6 +760,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
           if (first) view.passKey = passId(first);
         }
         show(prediction);
+        fillEpochs();
         ctx.notify();
       })
       .catch((err) => {
@@ -776,7 +773,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       });
   }
 
-  function renderPasses(list: HTMLElement, pred: PassPrediction, upcoming: VisiblePass[], tonight: Tonight, obs: Observer, tz: string, dome: Dome, redraw: () => void) {
+  function renderPasses(list: HTMLElement, pred: PassPrediction, upcoming: VisiblePass[], tonight: Tonight, obs: Observer, tz: string, redraw: () => void) {
     clear(list);
     const now = Date.now();
     for (const sat of pred.satellites) {
@@ -790,12 +787,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
         h(
           "div",
           { class: "sky-empty" },
-          h("p", null, h("strong", null, `No visible passes of ${names} in the next 4 nights.`)),
-          h(
-            "p",
-            null,
-            "A pass is visible only when the spacecraft is above 10°, still in sunlight, and your sky is dark (Sun below −6°). Passes come in spells of a few days, when the orbit lines up with dusk or dawn; check again in a few days. Spacecraft in low-inclination orbits (Hubble, 28.5°) never reach high latitudes.",
-          ),
+          h("p", null, h("strong", null, `No visible passes of ${names} in the next 4 nights.`), " Passes come in spells of a few days; check again later (see “How to read this”)."),
         ),
       );
       return;
@@ -844,24 +836,47 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       });
       list.append(h("p", { class: "sky-more" }, more));
     }
-    const epochs = sats.satellites.map((x) => Date.parse(x.epoch));
-    list.append(
-      h(
-        "p",
-        { class: "sky-note" },
-        `Times are when each pass is visible (above 10°, sunlit, Sun below −6°). Orbits from CelesTrak, epochs ${utc(new Date(Math.min(...epochs)))}${epochs.length > 1 ? ` – ${utc(new Date(Math.max(...epochs)))}` : ""}.`,
-      ),
-    );
   }
 
-  function footnote(): HTMLElement {
-    return h(
-      "p",
-      { class: "footnote sky-honesty" },
-      "Computed in your browser. Sun, Moon and planets from JPL’s planetary elements and Meeus’ solar and lunar theories: positions within about 0.1°, rise, set and twilight times within about 2 minutes. Planet brightness from the Astronomical Almanac’s model (Mallama & Hilton 2018). “Visible” planets are above ",
-      `${MIN_PLANET_ALT}° while the Sun is below ${DARK_SUN_ALT}° and at least ${GLARE_ELONGATION}° from it. `,
-      "Spacecraft passes are SGP4 predictions from CelesTrak’s orbital elements: usually within a minute while the elements are fresh, more after an orbit boost. Their brightness is a rough estimate (real spacecraft vary by a magnitude or more), and Earth’s shadow is modelled as a simple cylinder (entry and exit ± about 10 s).",
+  /** Everything that explains rather than shows, in one collapsed block at the bottom. */
+  function howTo(epochsSlot: HTMLElement): HTMLElement {
+    const det = h(
+      "details",
+      { class: "sky-howto" },
+      h("summary", null, "How to read this"),
+      h(
+        "div",
+        { class: "sky-howto-body" },
+        h("h4", null, "The sky dome"),
+        h(
+          "p",
+          null,
+          "Zenith in the centre, horizon at the edge. North is up and east is on the left: the sky as you see it lying on your back with your head to the north. Dots are sized by brightness; open circles need binoculars. Drag the slider, or use the arrow keys (Shift for 1-minute steps); “Now” returns to the current sky.",
+        ),
+        h("h4", null, "Planets"),
+        h(
+          "p",
+          null,
+          `A planet counts as visible when it is above ${MIN_PLANET_ALT}° while the Sun is below ${DARK_SUN_ALT}°, and at least ${GLARE_ELONGATION}° from the Sun. Magnitudes: smaller is brighter; beyond ${NAKED_EYE_MAG} you need binoculars.`,
+        ),
+        h("h4", null, "Spacecraft passes"),
+        h(
+          "p",
+          null,
+          "A pass is listed while the spacecraft is above 10°, still in sunlight, and your sky is dark (Sun below −6°); the times are that visible part. Passes come in spells of a few days, when the orbit lines up with dusk or dawn. Spacecraft in low-inclination orbits (Hubble, 28.5°) never rise high at high latitudes. The orbits are downloaded from CelesTrak only when you press a button; the Sun, Moon and planets need no download.",
+          epochsSlot,
+        ),
+        h("h4", null, "Accuracy"),
+        h(
+          "p",
+          null,
+          "Everything is computed in your browser. Sun, Moon and planets from JPL’s planetary elements and Meeus’ solar and lunar theories: positions within about 0.1°, rise, set and twilight times within about 2 minutes; planet brightness from the Astronomical Almanac’s model (Mallama & Hilton 2018). Spacecraft passes are SGP4 predictions from CelesTrak’s orbital elements: usually within a minute while the elements are fresh, more after an orbit boost. Their brightness is a rough estimate (real spacecraft vary by a magnitude or more), and Earth’s shadow is modelled as a simple cylinder (entry and exit ± about 10 s).",
+        ),
+      ),
     );
+    det.open = view.howToOpen;
+    det.addEventListener("toggle", () => (view.howToOpen = det.open));
+    return det;
   }
 
   /* ---------- Clock */

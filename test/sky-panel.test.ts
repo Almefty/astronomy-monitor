@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { angularSeparation } from "../shared/astro";
 import { moonPhase, nightEvents, riseTransitSet, skyPosition, SKY_PLANETS, timeZoneOffset, type Observer } from "../shared/sky";
 import {
-  computeTonight, coordinateFromInput, dayLabel, defaultHemispheres, solarOffsetHours, typedSign, DARK_SUN_ALT, domeAngle, domePoint, fmtMag, formatCoords, GLARE_ELONGATION, hhmm, intersect, MIN_PLANET_ALT,
-  moonLitBearing, nightSentences, parseCoordinate, parseLocation, passTimes, skyBearing, skyOffset, utcOffsetLabel,
+  computeTonight, dayLabel, formatLatLonInput, parseLatLon, solarOffsetHours, DARK_SUN_ALT, domeAngle, domePoint, fmtMag, formatCoords, GLARE_ELONGATION, hhmm, intersect, MIN_PLANET_ALT,
+  moonLitBearing, nightSentences, parseLocation, passTimes, skyBearing, skyOffset, utcOffsetLabel,
 } from "../src/viz/sky-model";
 
 /*
@@ -197,33 +197,48 @@ describe("location and formatting", () => {
     for (const bad of [null, "x", { kind: "other", lat: 0, lon: 0 }, { kind: "device", lat: 95, lon: 0 }, { kind: "device", lat: "1", lon: 2 }]) expect(parseLocation(bad)).toBeNull();
   });
 
-  it("parses typed coordinates", () => {
-    expect(parseCoordinate("6.2")).toBe(6.2);
-    expect(parseCoordinate("+18.4")).toBe(18.4);
-    expect(parseCoordinate(" −33,92 ")).toBe(-33.92);
-    expect(parseCoordinate("18°")).toBe(18);
-    for (const bad of ["", "abc", "1e3", "12.3.4", "1234"]) expect(parseCoordinate(bad)).toBeNaN();
+  it("reads one coordinate field: Google Maps style and hemisphere letters", () => {
+    const ok = (lat: number, lon: number) => ({ ok: true, lat, lon });
+    expect(parseLatLon("-33.87, 151.21")).toEqual(ok(-33.87, 151.21)); // copied from Google Maps
+    expect(parseLatLon("-33.8688,151.2093")).toEqual(ok(-33.8688, 151.2093));
+    expect(parseLatLon("-33.87 151.21")).toEqual(ok(-33.87, 151.21));
+    expect(parseLatLon("33.87 S, 151.21 E")).toEqual(ok(-33.87, 151.21));
+    expect(parseLatLon("33.87°S 151.21°E")).toEqual(ok(-33.87, 151.21));
+    expect(parseLatLon("33.87° s, 151.21° e")).toEqual(ok(-33.87, 151.21));
+    expect(parseLatLon("S 33.87, E 151.21")).toEqual(ok(-33.87, 151.21));
+    expect(parseLatLon("40.71 N, 74.01 W")).toEqual(ok(40.71, -74.01));
+    expect(parseLatLon("151.21 E, 33.87 S")).toEqual(ok(-33.87, 151.21)); // letters say which is which
+    expect(parseLatLon("6,2; 106,8")).toEqual(ok(6.2, 106.8)); // decimal commas
+    expect(parseLatLon("−6.2, 106.8")).toEqual(ok(-6.2, 106.8)); // Unicode minus
+    expect(parseLatLon("  69.65 , 18.96  ")).toEqual(ok(69.65, 18.96));
   });
 
-  it("a typed sign wins over the N/S or E/W select; without one the select decides", () => {
-    // Sign typed: it wins, and the select is to be switched to match (hemi).
-    expect(coordinateFromInput("-33.87", -1)).toEqual({ value: -33.87, hemi: -1 }); // was 33.87° N
-    expect(coordinateFromInput("-33.87", 1)).toEqual({ value: -33.87, hemi: -1 });
-    expect(coordinateFromInput("−151.21", 1)).toEqual({ value: -151.21, hemi: -1 }); // Unicode minus
-    expect(coordinateFromInput("+18.42", -1)).toEqual({ value: 18.42, hemi: 1 });
-    // No sign: the select decides.
-    expect(coordinateFromInput("33.87", -1)).toEqual({ value: -33.87, hemi: -1 });
-    expect(coordinateFromInput("33.87", 1)).toEqual({ value: 33.87, hemi: 1 });
-    expect(coordinateFromInput(" 6,2 ", -1)).toEqual({ value: -6.2, hemi: -1 });
-    expect(coordinateFromInput("abc", 1).value).toBeNaN();
-    expect(typedSign("  -1")).toBe(-1);
-    expect(typedSign("1")).toBeNull();
+  it("keeps the sign rule: a typed sign wins, else the letter, else north and east", () => {
+    // Sign and letter disagree: the sign wins ("-33.87 N" was a sign × select bug before).
+    expect(parseLatLon("-33.87 N, 151.21 E")).toEqual({ ok: true, lat: -33.87, lon: 151.21 });
+    expect(parseLatLon("+33.87 S, -151.21 E")).toEqual({ ok: true, lat: 33.87, lon: -151.21 });
+    // No sign: the letter decides.
+    expect(parseLatLon("33.87 S, 151.21 W")).toEqual({ ok: true, lat: -33.87, lon: -151.21 });
+    // Neither: north and east (the old selects' default).
+    expect(parseLatLon("33.87, 151.21")).toEqual({ ok: true, lat: 33.87, lon: 151.21 });
   });
 
-  it("defaults the hemisphere selects to north and east without a saved location", () => {
-    expect(defaultHemispheres(null)).toEqual({ lat: 1, lon: 1 });
-    expect(defaultHemispheres({ lat: -33.92, lon: 18.42 })).toEqual({ lat: -1, lon: 1 });
-    expect(defaultHemispheres({ lat: 40.71, lon: -74.01 })).toEqual({ lat: 1, lon: -1 });
+  it("rejects what it can't read, with a message", () => {
+    for (const bad of ["", "abc", "-33.87", "1, 2, 3", "33,151", "12.3.4, 5", "33.87 S, 151.21 N", "N 33 E", "33 S 151 E 2", "S 33.87 151.21 E", "33.87 X, 151"]) {
+      const r = parseLatLon(bad);
+      expect(r.ok, bad).toBe(false);
+      if (!r.ok) expect(r.error.length).toBeGreaterThan(10);
+    }
+    expect(parseLatLon("91, 10")).toEqual({ ok: false, error: "Latitude must be between 90° S and 90° N." });
+    expect(parseLatLon("-90.5, 10")).toEqual({ ok: false, error: "Latitude must be between 90° S and 90° N." });
+    expect(parseLatLon("10, 181 W")).toEqual({ ok: false, error: "Longitude must be between 180° W and 180° E." });
+    expect(parseLatLon("90 N, 180 W")).toEqual({ ok: true, lat: 90, lon: -180 });
+    expect(parseLatLon("33.87 E, 151.21 E").ok).toBe(false);
+  });
+
+  it("prefills the field Google Maps style", () => {
+    expect(formatLatLonInput(-33.87, 151.21)).toBe("-33.87, 151.21");
+    expect(parseLatLon(formatLatLonInput(-6.2, 106.8))).toEqual({ ok: true, lat: -6.2, lon: 106.8 });
   });
 
   it("wraps the solar-time offset into [−12, 12) h, so places across the date line get no false warning", () => {
