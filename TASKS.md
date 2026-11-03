@@ -29,6 +29,13 @@ one's outcome) and says "7 of 7 panels loaded · oldest data 25 min old", naming
 **2026-11-01 (v4, PR 2 of 3):** spacecraft elements and visible passes: Worker source `satellites` (CelesTrak)
 and `src/viz/passes.ts` (SGP4 via satellite.js, not loaded by the page yet). 156 unit tests pass after the
 ultrareview fixes (see PR 2 below).
+**2026-11-01 (v4, PR 3 of 3):** the "Sky tonight" panel (`src/panels/sky.ts`, after APOD): location picker,
+tonight's events, Moon, planets, spacecraft passes, sky dome, "Right now" summary. 182 unit tests pass. Not deployed
+yet (see PR 3 below for what was and wasn't verified).
+**2026-11-03 (v4, PR 3 layout pass):** the sky panel simplified without removing features (see "PR 3 layout pass"
+below). 188 unit tests pass.
+**2026-11-01 (v4, PR 3 review fixes):** nine fixes from the maintainer's review, incl. CelesTrak requests in parallel
+(see "PR 3 review fixes" below). 187 unit tests pass.
 
 # Version 4 — Sky tonight (in progress, plan in `docs/plans/sky-tonight.md`)
 
@@ -71,11 +78,156 @@ ultrareview fixes (see PR 2 below).
   Mercury polynomial beyond the paper's 170° phase angle, so we do too; a horizon dip shorter than the
   10-min scan can be missed (a body grazing the horizon near the poles).
 
+## PR 3 — the panel (2026-11-01)
+- [x] **Loading model** (the plan's preferred option): the Sun, Moon and planets are computed as soon as a location
+      exists, with no request: `PanelDefinition.initial()` gives `PanelHost` a result to show before anything is
+      loaded or saved (header: "Spacecraft orbits not loaded"). Only `/api/sources/satellites` waits for a press
+      (↻, "Refresh all", or the panel's "Load spacecraft passes"). A failed orbit fetch doesn't throw: `load()`
+      keeps the previous orbits, the error shows inside the passes section, and `PanelResult.failed` makes "Refresh
+      all" count the panel as failed, puts the text in the header and skips saving. `restoredNotice()` replaces the
+      generic "last data you loaded" note (only the orbits are old; the sky is always computed for now).
+      `RenderContext.notify()` redraws the "Right now" strip after a location change or new passes.
+- [x] **Location**: opt-in, never prompted on load. "Use my location" (Geolocation API, on press only), six preset
+      cities (Jakarta, London, New York, Tromsø, Cape Town, Sydney, each with its IANA zone), or latitude/longitude
+      typed as a number plus N/S, E/W (phones' decimal keypads have no minus key). Stored via `core/storage.ts`
+      (`sky:location`), rounded to 0.01°, validated on load; "Forget my location" removes it. Never sent to `/api`,
+      never in the URL. Manual and device locations use the browser's zone and say which; a place more than 3 h of
+      longitude from that zone gets a note. **`public/_headers` had `geolocation=()`**, which blocks the API
+      entirely; now `geolocation=(self)` (checked in the production preview with a granted permission).
+- [x] **Content**: stats (sunset + civil dusk, "dark sky" = Sun below −18°, sunrise + civil dawn, Moon % with an SVG
+      phase drawn with its lit side towards the Sun as seen facing the Moon, zenith up), plain sentences for polar
+      day, polar night, white nights and no full darkness; one row per planet ("visible" = above 5° while the Sun is
+      below −6° and ≥ 10° from it; otherwise the reason: glare, daylight only, stays low, below the horizon, sky not
+      dark) with best time, direction, altitude, visible interval, rise/set and magnitude (binoculars beyond 5.5);
+      passes for the next 4 nights (6 shown, "Show all"), brightest marked, start/end causes (Earth's shadow,
+      twilight), "No visible passes tonight. Next: …", or an explanation when there are none in 4 nights;
+      per-satellite errors and missing objects listed; element epochs shown.
+- [x] **Sky dome** (SVG, `src/viz/sky-model.ts` geometry): azimuthal equidistant, zenith centre, N up, E left, 30°/60°
+      rings; Sun, Moon (phase, lit side along the great circle to the Sun), planets sized by magnitude (open circles
+      beyond 5.5), the selected pass's track with direction arrow and its position during the pass; labels placed to
+      avoid each other and the dots; `src/viz/tooltip.ts` on hover/tap. Time slider sunset → sunrise (noon → noon
+      without them, labelled with dates), "Now" (follows the clock, 1-minute ticker, paused while hidden), arrows ±10
+      min, Shift ±1 min; opened in the afternoon it shows the start of darkness. Selecting a pass on a later night
+      moves the dome to that night. `role="img"` with a text summary; the lists are the text equivalent. No animation
+      anywhere, so reduced motion needs nothing extra.
+- [x] **"Right now" strip**: "Sky tonight · Jakarta — ISS 19:39 — Pass, mag −1.3 · Moon 54%, Saturn up", or
+      "Moon 54% — Last Quarter · Mars, Jupiter and Saturn tonight", or "Pick a location".
+- [x] **satellite.js in the build**: the first production build with `passes.ts` imported failed: satellite.js 7's
+      entry re-exports its WebAssembly runtimes, and Vite tried to bundle the multi-thread one as a Web Worker (IIFE,
+      top-level await). `vite.config.ts` aliases `#wasm-single-thread` / `#wasm-multi-thread` (only reached through
+      functions this app never calls) to `src/viz/satellite-no-wasm.ts`. Result: `passes-*.js` 25.7 kB (12.6 kB gzip),
+      loaded with `import()`; SGP4 code is not in `index-*.js` (checked by its field names). Main bundle 184.3 → 224.9 kB
+      (66.5 → 82.1 kB gzip): the panel, `shared/sky.ts` and `sky-model.ts`. No WASM files in `dist/`.
+- [x] Tests: `test/sky-panel.test.ts` (26): dark intervals vs the Sun, planet visibility and best time vs a 2-minute
+      brute-force scan (6 site/date cases incl. polar day/night and London midsummer), rise/set vs `riseTransitSet`
+      (< 0.1 min), best time = transit when it culminates in the dark, polar sentences, Moon lit side points to the Sun
+      (great-circle check), dome orientation, stored-location validation, coordinate parsing, formatting. The PR 2
+      bundle test now runs against a real panel (`src/panels/sky.ts` uses only `import type` + `import()`).
+- [x] Speed. `computeTonight` (events, Moon, 7 planets) ≈ 16 ms warm in Node (first version 50 ms: it sampled every
+      planet twice through `riseTransitSet`; rise/set and best time now come from one set of samples per body).
+      Headless Chromium, production build, first (cold) run per page load: tonight 42–61 ms, 4-night passes 26–36 ms;
+      with **4× CPU throttling** (DevTools' mid-tier-phone setting): tonight 208 ms, passes 193 ms, both once per page
+      load (the passes after the async chunk load, so they don't block the first paint). This is above the plan's
+      "well under 100 ms on a phone" for a cold run on a slow phone; warm runs are 5–10× faster. **Not measured on a
+      real phone** — do that after deploying.
+- [x] **Verified locally** (Playwright Chromium, dev server and production preview; the satellites response served
+      from the PR 2 CelesTrak fixture by request interception, because local workerd can't reach upstreams from the
+      cloud container): light and dark at 1280, 375 and 360 px with no horizontal scroll; Jakarta, Cape Town, London,
+      Tromsø, typed southern coordinates (45.87° S, 170.50° E, with the zone note), device location (granted
+      permission, Cape Town); Tromsø polar night (21 Dec 2026) and polar day (21 Jun 2027) with a fixed clock; no
+      location; orbits failing (inline error, header, "Refresh all" lists the panel, sky still drawn, previous passes
+      kept); snapshot restore after reload; slider keyboard steps; no console errors.
+- [ ] **Not verified yet**: the deployed site (needs a merge to `main`), `/api/sources/satellites` from Cloudflare
+      (Workers Builds preview), a real phone (speed, Safari geolocation prompt, iOS keypad), Playwright WebKit.
+- Not built: Webb/Hubble targets on the dome (the plan's optional item): it would read the telescope panel's saved
+  result and couple the panels, which the plan said to skip.
+- Known limits: the dome draws planets lost in twilight or glare too (it is a position chart; the tooltip says
+  "lost in the Sun's glare"); visibility uses fixed thresholds (5°, −6°, 10° from the Sun), not limiting magnitude
+  or sky brightness; times for manual coordinates are in the browser's zone, not the place's.
+
+## PR 3 review fixes (2026-11-01)
+1. **Coordinate sign vs hemisphere select**: "-33.87" with S became 33.87° N (sign × select). One rule now
+   (`coordinateFromInput` in `src/viz/sky-model.ts`): a typed sign (ASCII minus, Unicode minus or plus) wins and the select switches to
+   match, as you type and on submit; without a sign the select decides. Unit tests for both, and a browser check
+   ("-33.87" + S → 33.87° S; "+74.01" with W picked → 74.01° E).
+2. **Default hemispheres** were S/E with no saved location; now N/E (`defaultHemispheres`). Tested, and checked in the browser.
+3. **New night not detected in a hidden tab**: the clock compared the night with the shared `tonightCache`, which the
+   strip's `summarize()` refreshes every minute even while the panel isn't redrawn, so the panel kept showing last
+   night. The render now remembers the night it drew (`drawnNight`). Browser check with Playwright's clock (Jakarta,
+   tab hidden across solar noon, then shown): the old code kept the 1 Nov slider range and the chosen 22:10, the new
+   code moves to 2 Nov.
+4. On a new night `view.ms`, `view.domeNight`, `view.passKey` (and "Show all") are reset before `build()`, so an
+   afternoon view picks the new night's start of darkness again.
+5. **Late geolocation answers** are ignored when another location was chosen meanwhile (`locationVersion`) or the
+   render was destroyed. Browser check: answer delayed 1.5 s, Jakarta picked meanwhile → stays Jakarta.
+6. An unusable position (rejected by `toObserver`) re-enables "Use my location" and removes `is-busy`, like the error path.
+7. The time-zone note's solar offset is wrapped to [−12, 12) h (`solarOffsetHours`): Tonga, Samoa and Kiritimati
+   (west longitudes on UTC+13/+14) no longer get a false note; Ürümqi on Beijing time still does. Tested.
+8. The dome tooltip uses the planet's `glare` status and the footnote `GLARE_ELONGATION` instead of a literal 10.
+9. **CelesTrak in parallel**: the maintainer saw CelesTrak answering in 5–10 s per request on the preview; one after
+   another that was ~24 s in production, and the preview hit the 15 s default timeout on the first call. The three
+   requests now run in parallel (still one per object, never retried), each with a **25 s** timeout
+   (`REQUEST_TIMEOUT_MS`; a timeout costs a 10-minute failure cache, so it is generous; the browser waits up to 100 s).
+   Any non-200 other than "No GP data found", a timeout or a network error makes the answer a failure (502) or a
+   partial one with a warning, both cached for 600 s, so no request leaves that data centre for 10 minutes. The
+   trade-off: in parallel the other two calls are already sent when one fails (at most two extra requests per
+   error), where the sequential version skipped them. Results keep the list order; `unavailable` no longer says
+   "Not requested after an earlier CelesTrak error". Tests: the three requests start before any finishes (~40 ms
+   total with 40 ms stubs), timeouts and network errors count as failures, any other 404 is a failure.
+   CLAUDE.md's CelesTrak rule updated. **Not verified against the live CelesTrak** from here (cloud container); check
+   the response time on the next Workers Builds preview.
+- `npm run check` passes (187 tests); production preview re-checked at 360 px light, 375 px dark and 1280 px, no
+  horizontal scroll, no console errors.
+
+## PR 3 layout pass (2026-11-03)
+The maintainer found the panel cluttered, especially on phones. Same features, fewer controls:
+1. **Location picker**: one primary "Use my location" button and a "Choose a city…" `<select>` (was six buttons).
+   Coordinates sit behind an "Enter coordinates" disclosure as **one text field** (`parseLatLon` in
+   `src/viz/sky-model.ts`; replaces the two number fields and the N/S, E/W selects). It reads "-33.87, 151.21"
+   as Google Maps copies it, "33.87 S, 151.21 E", "33.87°S 151.21°E", "S 33.87 E 151.21", "151.21 E, 33.87 S" (letters say
+   which is which) and decimal commas when the numbers are separated by a space or semicolon. The sign rule stays:
+   a typed sign wins, else the letter, else north/east. Out-of-range and unreadable input get a message and
+   `aria-invalid`. Tests replaced (`coordinateFromInput`, `typedSign`, `defaultHemispheres` are gone with the
+   selects). The field is prefilled Google-Maps style for a manual location. Privacy note is one line
+   ("Your location stays in this browser (rounded to about 1 km).") with "Forget it".
+2. **One load button**: the passes section keeps "Load spacecraft passes" (and "Try again" after a failure; it shows
+   "Loading…" while busy). While it shows, the header ↻ is hidden through a new `RenderContext.setRefreshVisible()`
+   (`PanelHost` resets it on every render and on errors); it returns once orbits are loaded. With no location chosen
+   the header ↻ stays (no other button then). Checked in every state: exactly one of them visible.
+3. "Change location" is a small text link ("Change" / "Close") next to the place name.
+4. The dome's "Now" sits beside the shown time and appears only when the dome is away from now (> 1 min); pressing it
+   moves focus to the slider. `.btn` sets `display`, so `[hidden]` needed explicit CSS for it and the header ↻.
+5. **"How to read this"** (`<details>`, closed by default, remembered for the visit): the dome explanation, the planet
+   visibility rule, the spacecraft note (pass criteria, spells, low-inclination orbits, the download happens only on
+   a press, element epochs and age) and the accuracy footnote. The empty-pass state keeps one sentence.
+6. **Planets not visible tonight** share one collapsed row ("Not visible tonight: Mercury and Venus"); opened, each
+   says why. The "Visible"/"Not visible" tags are gone (the grouping says it).
+- Verified on the production preview (Playwright Chromium, orbits from the PR 2 fixture): 375 px light and dark,
+  360 px light (no location; Tromsø with every disclosure open) and dark, 1280 px light (Jakarta) and dark (typed
+  coordinates, orbits failing); no horizontal scroll, no console errors; the coordinate field with both formats,
+  an unreadable and an out-of-range input; the city select and the Change link.
+
+## Lessons learned (v4, PR 3)
+- **`[hidden]` doesn't hide a `.btn`**: the class sets `display`, which wins. Add a `[hidden]` rule wherever a
+  button is hidden that way (the first screenshots still showed "Now" while following the clock).
+- **Test against the code you are fixing**: the hidden-tab new-night check was run once against the previous
+  `sky.ts` to confirm it fails there.
+- **`vite preview` serves the build it started with**: restart it after `npm run build` (already noted for v3), or
+  a check silently runs the old bundle.
+- **A lazy library can still break the build**: tests import satellite.js in Node and passed for all of PR 2, but
+  the first `vite build` with the page importing it failed on its unused WASM runtime. Run `npm run build` as soon
+  as a new library reaches the page.
+- **`Permissions-Policy` blocks APIs silently**: `geolocation=()` makes `getCurrentPosition` fail as if the user
+  refused. Check `public/_headers` before using any browser permission.
+- **Sampling twice costs twice**: `riseTransitSet` samples altitude and hour angle; deriving rise/set and the best
+  time from the panel's own samples cut a night from 50 to 16 ms.
+
 ## PR 2 — spacecraft elements and visible passes (2026-11-01)
 - [x] Worker source `satellites` (`worker/sources/satellites.ts`, `SatellitesData` in `shared/contract.ts`): the
       ISS (25544), Tiangong (48274) and Hubble (20580), listed once with their standard magnitudes. CelesTrak's
       `gp.php?CATNR=<id>&FORMAT=JSON` takes **one** catalog number per query (`CATNR=a,b` → "not an integer"), so
-      3 calls of ~420 bytes, made **one after another** and stopped at the first non-200 answer (CelesTrak's
+      3 calls of ~420 bytes, made **one after another** and stopped at the first non-200 answer (*changed in the PR 3
+      review fixes: now in parallel*; CelesTrak's
       usage policy), except its "No GP data found" 404 (see the ultrareview fixes). The answer keeps only the OMM
       fields SGP4 needs plus name, ID and epoch. No query parameters (one cache entry for everyone). Stale epochs
       (> 7 days) → **info** notice, so the answer keeps its cache lifetime (re-downloading can't make CelesTrak's

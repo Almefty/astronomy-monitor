@@ -73,7 +73,7 @@ refreshAllBtn.querySelector("svg")?.classList.add("spin");
 const lastAll = h(
   "div",
   { class: "intro-meta" },
-  hosts.some((host) => host.result) ? "Showing data saved from your last visit — press Refresh all for live data" : "Press Refresh all to load live data",
+  hosts.some((host) => host.result && !host.isInitial) ? "Showing data saved from your last visit — press Refresh all for live data" : "Press Refresh all to load live data",
 );
 
 /** The last "Refresh all": when it ran and which panels failed. */
@@ -90,7 +90,7 @@ function renderLastAll() {
   const parts = [`Refreshed ${localTime(at)}`, `${hosts.length - failed.length} of ${hosts.length} panels loaded`];
   if (failed.length) parts.push(`failed: ${failed.join(", ")}`);
   const oldest = hosts
-    .filter((host) => !failed.includes(host.def.title))
+    .filter((host) => !failed.includes(host.def.title) && !host.isInitial)
     .map((host) => host.result?.fetchedAt)
     .filter((t): t is string => !!t)
     .sort()[0];
@@ -198,7 +198,7 @@ document.body.append(
     h(
       "section",
       { class: "intro", "aria-label": "Overview" },
-      h("div", null, h("h1", null, "What’s happening up there"), h("p", null, "Asteroid flybys (also in a 3D Solar System), the Sun’s mood, cosmic explosions, what Webb and Hubble are looking at, newly found worlds and today’s sky picture — fetched live when you ask.")),
+      h("div", null, h("h1", null, "What’s happening up there"), h("p", null, "Asteroid flybys (also in a 3D Solar System), the Sun’s mood, cosmic explosions, what Webb and Hubble are looking at, newly found worlds, today’s sky picture and what you can see tonight — fetched live when you ask.")),
       lastAll,
     ),
     liveStatus,
@@ -207,7 +207,7 @@ document.body.append(
     h(
       "footer",
       { class: "site-foot" },
-      h("span", null, "Data: NASA/JPL SSD-CNEOS (close approaches, SBDB orbits, planetary elements) · NASA DONKI (CCMC) · NOAA SWPC · NASA GCN · STScI & MAST · CDS · NASA Exoplanet Archive (Caltech/IPAC) · NASA APOD. All times UTC unless noted."),
+      h("span", null, "Data: NASA/JPL SSD-CNEOS (close approaches, SBDB orbits, planetary elements) · NASA DONKI (CCMC) · NOAA SWPC · NASA GCN · STScI & MAST · CDS · NASA Exoplanet Archive (Caltech/IPAC) · NASA APOD · CelesTrak (spacecraft orbits). All times UTC unless noted."),
       h("span", null, "Data is fetched when you press a refresh button — or, only while Live mode is on and this tab is visible, automatically."),
     ),
   ),

@@ -30,5 +30,7 @@ export const ICONS = {
   recenter: wrap(`<circle cx="12" cy="12" r="3"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/>`),
   shuffle: wrap(`<path d="M3.5 7h3.2c2 0 3.2 1 4.3 2.7l2 3.4c1.1 1.8 2.3 2.9 4.3 2.9h3.2M3.5 17h3.2c1.5 0 2.5-.6 3.4-1.6M13.4 8.6c.9-1 1.9-1.6 3.3-1.6h3.8M18 4.5L20.5 7 18 9.5M18 14.5l2.5 2.5-2.5 2.5"/>`),
   calendar: wrap(`<rect x="3.5" y="5" width="17" height="15.5" rx="1.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>`),
+  sky: wrap(`<path d="M3.5 19.5a8.5 8.5 0 0 1 17 0"/><path d="M2.5 19.5h19"/><path d="M14.8 9.6a3.4 3.4 0 1 1-3.9-4.3 2.7 2.7 0 0 0 3.9 4.3z"/><path d="M6.5 6.5v2M5.5 7.5h2M18.5 3.5v2M17.5 4.5h2"/>`),
+  pin: wrap(`<path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.4"/>`),
   key: wrap(`<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3M14 9l2 2"/>`),
 } as const;
