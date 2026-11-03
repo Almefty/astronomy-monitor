@@ -13,6 +13,12 @@ export interface SourceContext {
   noCache(): void;
   /** Cache this response for a shorter time than the source's `maxAge` (e.g. the APOD week holding today). */
   cacheFor(seconds: number): void;
+  /**
+   * GET one of this Worker's internal `/api/internal/...` routes through the cached `Api` entrypoint
+   * (Workers Cache in production; a direct call in tests and without a loopback). Used by `satellites`
+   * to keep a per-object copy that survives CelesTrak errors (`stale-if-error`).
+   */
+  internal(path: string): Promise<Response>;
 }
 
 /**

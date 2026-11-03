@@ -171,12 +171,23 @@ export interface SatelliteElements {
   /** Element-set epoch, ISO 8601 UTC. Predictions degrade quickly once this is more than a few days old. */
   epoch: string;
   omm: SatelliteOmm;
+  /** When the Worker downloaded these elements from CelesTrak (ISO 8601 UTC). */
+  fetchedAt?: string;
+  /**
+   * True when CelesTrak didn't answer this time and the elements are the copy Cloudflare kept from an
+   * earlier successful download (`stale-if-error`, at most ~3 days; see worker/sources/satellites.ts).
+   */
+  saved?: boolean;
 }
 
 export interface SatellitesData {
   satellites: SatelliteElements[];
-  /** Objects in the list whose elements couldn't be loaded this time. */
-  unavailable: { id: number; name: string; reason: string }[];
+  /**
+   * Objects in the list whose elements couldn't be loaded this time. `failed`: the request failed
+   * (non-200, timeout, network); `missing`: CelesTrak answered but had no usable elements.
+   * Answers from before 2026-11-03 have no `kind`; treat it as `failed`.
+   */
+  unavailable: { id: number; name: string; reason: string; kind?: "failed" | "missing" }[];
   /** Elements older than this many days are flagged as stale. */
   staleAfterDays: number;
 }

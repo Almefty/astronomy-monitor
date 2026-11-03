@@ -78,11 +78,22 @@ commands) and `TASKS.md` (state, known issues, lessons) first.
 - The panel computes the Sun, Moon and planets without a refresh (`PanelDefinition.initial()`); only
   `/api/sources/satellites` waits for a press, and its failure stays inside the passes section (`PanelResult.failed`).
 - **CelesTrak's usage policy:** GP data updates every 2 hours; keep `maxAge` ≥ 7,200 s, one call per object
-  (`CATNR` takes one number), never retry. The three calls run **in parallel** (CelesTrak can take 5–10 s per
-  answer; in a row they took ~24 s), each with a 25 s timeout (`REQUEST_TIMEOUT_MS`). Any non-200 (except its
-  "No GP data found" 404, an answer about one object), timeout or network error makes the answer a failure or
-  partial one, cached for 600 s (`failureMaxAge`, the exception above): that is how the Worker "stops after a
-  non-200": no further request from that data centre for 10 minutes. Don't fetch whole groups.
+  (`CATNR` takes one number), never retry. The three calls run **in parallel**, each with a 12 s timeout
+  (`REQUEST_TIMEOUT_MS`): healthy answers take ~1 s, but from Cloudflare CelesTrak often fails with HTTP 522
+  after ~20 s. Any non-200 (except its "No GP data found" 404, an answer about one object), timeout or network
+  error makes the answer a failure or partial one, cached for 600 s (`failureMaxAge`, the exception above): that
+  is how the Worker "stops after a non-200": no further request from that data centre for 10 minutes. Don't
+  fetch whole groups.
+- **Saved elements (fallback for CelesTrak failures):** each object goes through its own internal route
+  `/api/internal/celestrak/<id>`, called back through the cached `Api` entrypoint (`SourceContext.internal`;
+  the front Worker never forwards `/api/internal/*`). A good answer is cached `public, max-age=7200,
+  stale-if-error=259200`, so when the Worker fails on revalidation Workers Cache serves the old copy for up to
+  3 days; failures are `no-store` so they never replace it. Never add `s-maxage` there (it disables
+  `stale-if-error`). The aggregate flags such objects `saved: true` (with `fetchedAt`) and caches that answer
+  600 s. Best effort (eviction, per data centre, reset per code deploy). The browser keeps its own copy too
+  (`src/viz/sky-elements.ts`, key `sky:elements` via `core/storage.ts`). Both use a copy for at most 3 days
+  from the elements' epoch and say so per spacecraft in the passes section. Don't use the Cache API for this:
+  it doesn't work on workers.dev.
 
 ## Commands
 - `npm run dev` — local dashboard at http://localhost:5173 (uses `scripts/dev.mjs`, see TASKS.md)

@@ -11,6 +11,7 @@ import type { PanelDefinition, PanelResult, RenderContext } from "../core/panel"
 import { load as loadStored, remove as removeStored, save as saveStored } from "../core/storage";
 // Types only: satellite.js (inside passes.ts) is loaded with import() when there is something to predict.
 import type { PassPrediction, VisiblePass } from "../viz/passes";
+import { isSatelliteElements, loadElements, SAVED_ELEMENTS_KEY, savedCopyNote, type SavedIo } from "../viz/sky-elements";
 import {
   dayLabel, fmtMag, formatCoords, formatLatLonInput, GLARE_ELONGATION, hhmm, LOCATION_KEY, parseLatLon, parseLocation, passTimes,
   solarOffsetHours, utcOffsetLabel, type SkyLocation,
@@ -30,6 +31,11 @@ export interface SkyData {
   satellites: SatellitesData | null;
   /** Why the last load of the elements failed (the rest of the panel keeps working). */
   error: { message: string; hint: string | null } | null;
+  /**
+   * Spacecraft whose elements come from this browser's saved copy (src/viz/sky-elements.ts) because the
+   * server couldn't load them this time. Optional: snapshots from before 2026-11-03 don't have it.
+   */
+  fromBrowser?: number[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -705,7 +711,6 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
           h("div", null, h("p", null, h("strong", null, "Spacecraft orbits couldn’t be loaded. "), error.message), error.hint ? h("p", { class: "hint" }, error.hint) : null, retry),
         ),
       );
-      if (satellites) body.append(h("p", { class: "sky-note" }, `Showing passes from the orbits loaded ${age(result.fetchedAt)} ago.`));
     }
     if (!satellites) {
       if (!error) {
@@ -780,6 +785,12 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       if (sat.error) list.append(h("p", { class: "sky-note" }, `${sat.name}: ${sat.error}`));
     }
     const sats = result.data.satellites!;
+    // Saved copies standing in for CelesTrak, said plainly per spacecraft.
+    const fromBrowser = new Set(result.data.fromBrowser ?? []);
+    for (const x of sats.satellites) {
+      const note = savedCopyNote(x, fromBrowser.has(x.id), !!result.data.error, now);
+      if (note) list.append(h("p", { class: "sky-note" }, note));
+    }
     for (const u of sats.unavailable) list.append(h("p", { class: "sky-note" }, `${u.name}: ${u.reason}`));
     const names = listText(sats.satellites.map((x) => x.name));
     if (!upcoming.length) {
@@ -931,7 +942,7 @@ function isSatellitesData(d: unknown): d is SatellitesData {
   return (
     Array.isArray(x.satellites) &&
     Array.isArray(x.unavailable) &&
-    x.satellites.every((s) => !!s && typeof s.id === "number" && typeof s.name === "string" && typeof s.epoch === "string" && typeof s.stdMag === "number" && !!s.omm && typeof s.omm === "object")
+    x.satellites.every(isSatelliteElements)
   );
 }
 
@@ -944,31 +955,35 @@ export const skyPanel: PanelDefinition<SkyData> = {
   source: { name: "CelesTrak GP elements · JPL planetary elements", url: "https://celestrak.org/NORAD/documentation/gp-data-formats.php" },
 
   async load(signal, _params, prev): Promise<PanelResult<SkyData>> {
-    try {
-      const env = await fetchSource("satellites", {}, signal);
-      return { data: { satellites: env.data, error: null }, fetchedAt: env.fetchedAt, upstream: env.upstream, notices: env.notices };
-    } catch (err) {
-      if (signal.aborted) throw err;
-      // The orbits failed: keep the previous ones (if any) and let the panel say so inline, so the
-      // Sun, Moon and planets stay on screen. "Refresh all" still counts this as a failure.
-      const api = err instanceof ApiError ? err : null;
-      const message = isRateLimited(err) ? "Too many requests to this site; try again in a minute." : (api?.message ?? (err as Error)?.message ?? "Unknown error.");
-      const keep = prev?.data.satellites ? prev : null;
-      return {
-        data: { satellites: keep?.data.satellites ?? null, error: { message, hint: api?.body?.error.hint ?? null } },
-        fetchedAt: keep?.fetchedAt ?? new Date().toISOString(),
-        upstream: api?.body?.upstream ?? [],
-        notices: keep?.notices ?? [],
-        failed: "Spacecraft orbits failed — see below",
-      };
+    // This browser's last good elements per spacecraft stand in for any CelesTrak couldn't give, while
+    // at most 3 days old (src/viz/sky-elements.ts).
+    const io: SavedIo = { read: () => loadStored(SAVED_ELEMENTS_KEY), write: (store) => saveStored(SAVED_ELEMENTS_KEY, store) };
+    const on = prev?.data.satellites ? { data: prev.data.satellites, fetchedAt: prev.fetchedAt } : null;
+    const out = await loadElements(() => fetchSource("satellites", {}, signal), io, on);
+    if (out.ok) {
+      const env = out.envelope;
+      return { data: { satellites: out.data, error: null, fromBrowser: out.fromBrowser }, fetchedAt: env.fetchedAt, upstream: env.upstream, notices: env.notices };
     }
+    const err = out.error;
+    if (signal.aborted) throw err;
+    // The orbits failed: show the saved copies (if any) and say so inline, so the Sun, Moon and planets
+    // stay on screen. "Refresh all" still counts this as a failure.
+    const api = err instanceof ApiError ? err : null;
+    const message = isRateLimited(err) ? "Too many requests to this site; try again in a minute." : (api?.message ?? (err as Error)?.message ?? "Unknown error.");
+    return {
+      data: { satellites: out.data, error: { message, hint: api?.body?.error.hint ?? null }, fromBrowser: out.fromBrowser },
+      fetchedAt: out.fetchedAt ?? new Date().toISOString(),
+      upstream: api?.body?.upstream ?? [],
+      notices: [],
+      failed: "Spacecraft orbits failed — see below",
+    };
   },
 
   render,
 
   initial() {
     return {
-      result: { data: { satellites: null, error: null }, fetchedAt: new Date().toISOString(), upstream: [], notices: [] },
+      result: { data: { satellites: null, error: null, fromBrowser: [] }, fetchedAt: new Date().toISOString(), upstream: [], notices: [] },
       stamp: "Spacecraft orbits not loaded",
     };
   },
@@ -980,7 +995,8 @@ export const skyPanel: PanelDefinition<SkyData> = {
   migrate(snap) {
     const d = snap.data as Partial<SkyData> | null;
     if (!d || !isSatellitesData(d.satellites)) return null;
-    return { ...snap, data: { satellites: d.satellites, error: null } };
+    const fromBrowser = Array.isArray(d.fromBrowser) ? d.fromBrowser.filter((id): id is number => typeof id === "number") : [];
+    return { ...snap, data: { satellites: d.satellites, error: null, fromBrowser } };
   },
 
   summarize(result) {

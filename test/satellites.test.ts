@@ -9,7 +9,7 @@ import {
 import { canonicalApiPath, handleApi } from "../worker/api";
 import type { Env } from "../worker/lib/env";
 import { SOURCES } from "../worker/sources/index";
-import { FAILURE_MAX_AGE, ommEpochMs, REQUEST_TIMEOUT_MS, SATELLITE_LIST, slimOmm, STALE_AFTER_DAYS } from "../worker/sources/satellites";
+import { FAILURE_MAX_AGE, INTERNAL_GP_PATH, ommEpochMs, REQUEST_TIMEOUT_MS, SATELLITE_LIST, SAVED_MAX_AGE_DAYS, slimOmm, STALE_AFTER_DAYS } from "../worker/sources/satellites";
 import ref from "./fixtures/satellites-reference.json";
 import vallado from "./fixtures/sgp4-vallado.json";
 
@@ -112,9 +112,9 @@ describe("CelesTrak elements (Worker)", () => {
 
   // Deliberate exception to "no-store for errors" (CLAUDE.md): CelesTrak asks clients to stop after
   // errors, so failed and partial answers are cached for FAILURE_MAX_AGE instead of being re-requested.
-  it("asks for the three objects at the same time, with a timeout that allows a slow CelesTrak", async () => {
-    // CelesTrak answered in 5–10 s per request in Nov 2026; one after another took ~24 s.
-    expect(REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
+  it("asks for the three objects at the same time, giving up before Cloudflare's ~20-s HTTP 522", async () => {
+    // Healthy answers take ~1 s; from Cloudflare CelesTrak often fails with HTTP 522 after ~20 s (Nov 2026).
+    expect(REQUEST_TIMEOUT_MS).toBe(12_000);
     const events: string[] = [];
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
       const id = Number(new URL(String(input instanceof Request ? input.url : input)).searchParams.get("CATNR"));
@@ -157,7 +157,7 @@ describe("CelesTrak elements (Worker)", () => {
     const body = (await res.json()) as Envelope<SatellitesData>;
     expect(asked).toHaveLength(3);
     expect(body.data.satellites.map((s) => s.name)).toEqual(["ISS", "Hubble"]);
-    expect(body.data.unavailable.map((u) => [u.name, u.reason])).toEqual([["Tiangong", expect.stringContaining("HTTP 403")]]);
+    expect(body.data.unavailable.map((u) => [u.name, u.reason, u.kind])).toEqual([["Tiangong", expect.stringContaining("HTTP 403"), "failed"]]);
     expect(body.notices).toEqual([{ level: "warning", text: expect.stringContaining("for Tiangong couldn’t be loaded") }]);
   });
 
@@ -183,7 +183,7 @@ describe("CelesTrak elements (Worker)", () => {
     const body = (await res.json()) as Envelope<SatellitesData>;
     expect(asked).toEqual([25544, 48274, 20580]);
     expect(body.data.satellites.map((s) => s.name)).toEqual(["ISS", "Hubble"]);
-    expect(body.data.unavailable).toEqual([{ id: 48274, name: "Tiangong", reason: "CelesTrak has no current elements for it." }]);
+    expect(body.data.unavailable).toEqual([{ id: 48274, name: "Tiangong", reason: "CelesTrak has no current elements for it.", kind: "missing" }]);
     expect(body.notices).toEqual([{ level: "info", text: expect.stringContaining("no usable orbital elements for Tiangong") }]);
   });
 
@@ -201,7 +201,7 @@ describe("CelesTrak elements (Worker)", () => {
     const body = (await res.json()) as Envelope<SatellitesData>;
     expect(asked).toEqual([25544, 48274, 20580]);
     expect(res.headers.get("cache-control")).toBe("public, max-age=7200");
-    expect(body.data.unavailable).toEqual([{ id: 20580, name: "Hubble", reason: expect.stringContaining("Invalid query") }]);
+    expect(body.data.unavailable).toEqual([{ id: 20580, name: "Hubble", reason: expect.stringContaining("Invalid query"), kind: "missing" }]);
     expect(body.notices.map((n) => n.level)).toEqual(["info"]);
   });
 
@@ -212,6 +212,120 @@ describe("CelesTrak elements (Worker)", () => {
     expect(res.headers.get("cache-control")).toBe("public, max-age=600");
     // The exception is CelesTrak's alone.
     expect(Object.values(SOURCES).filter((x) => x.failureMaxAge !== undefined).map((x) => x.id)).toEqual(["satellites"]);
+  });
+
+  /**
+   * A small model of Workers Cache in front of the `Api` entrypoint, as Cloudflare documents it: entries keyed by
+   * path + query, fresh for `max-age`; `no-store` and non-public answers aren't stored; when the Worker answers 5xx
+   * for an expired entry, the old entry is served instead while within `stale-if-error`.
+   */
+  function workersCache() {
+    const entries = new Map<string, { status: number; text: string; headers: [string, string][]; storedAt: number; maxAge: number; sie: number }>();
+    const replay = (e: { status: number; text: string; headers: [string, string][] }) => new Response(e.text, { status: e.status, headers: e.headers });
+    const loopback = async (req: Request): Promise<Response> => {
+      const u = new URL(req.url);
+      const key = u.pathname + u.search;
+      const now = Date.now();
+      const e = entries.get(key);
+      if (e && now - e.storedAt < e.maxAge * 1000) return replay(e);
+      const res = await handleApi(req, env, loopback);
+      if (res.status >= 500 && e && now - e.storedAt < (e.maxAge + e.sie) * 1000) return replay(e);
+      const cc = res.headers.get("cache-control") ?? "";
+      const maxAge = Number(/max-age=(\d+)/.exec(cc)?.[1] ?? 0);
+      if (cc.startsWith("public") && maxAge > 0) {
+        expect(cc).not.toContain("s-maxage"); // it would switch stale-if-error off
+        const text = await res.clone().text();
+        entries.set(key, { status: res.status, text, headers: [...res.headers], storedAt: now, maxAge, sie: Number(/stale-if-error=(\d+)/.exec(cc)?.[1] ?? 0) });
+      }
+      return res;
+    };
+    const get = async () => {
+      const res = await loopback(new Request("https://example.test/api/sources/satellites"));
+      return { res, body: (await res.json()) as Envelope<SatellitesData> };
+    };
+    return { entries, get };
+  }
+
+  it("keeps each object's last good elements behind its own cached internal route", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.UTC(2026, 10, 1, 6);
+    vi.setSystemTime(t0);
+    const cache = workersCache();
+    stub({});
+    const first = await cache.get();
+    expect(first.res.headers.get("cache-control")).toBe("public, max-age=7200");
+    expect(first.body.data.satellites.map((x) => [x.name, x.saved, x.fetchedAt])).toEqual([
+      ["ISS", undefined, new Date(t0).toISOString()], ["Tiangong", undefined, new Date(t0).toISOString()], ["Hubble", undefined, new Date(t0).toISOString()],
+    ]);
+    // One entry per object, kept for 3 days after it expires if the Worker then fails.
+    for (const id of [25544, 48274, 20580]) {
+      expect(cache.entries.get(`${INTERNAL_GP_PATH}/${id}`)?.headers).toContainEqual(["cache-control", "public, max-age=7200, stale-if-error=259200"]);
+    }
+    expect(SAVED_MAX_AGE_DAYS).toBe(3);
+
+    // Five hours later CelesTrak fails for Hubble (Cloudflare's HTTP 522).
+    vi.setSystemTime(t0 + 5 * 3_600_000);
+    let asked = stub({ 20580: () => new Response("error code: 522", { status: 522 }) });
+    const second = await cache.get();
+    expect(asked).toEqual([25544, 48274, 20580]); // once each, no retry
+    expect(second.res.status).toBe(200);
+    expect(second.res.headers.get("cache-control")).toBe("public, max-age=600");
+    const hubble = second.body.data.satellites.find((x) => x.name === "Hubble")!;
+    expect(hubble).toMatchObject({ saved: true, fetchedAt: new Date(t0).toISOString(), epoch: "2026-11-01T02:56:12.392Z" });
+    expect(second.body.data.satellites.filter((x) => x.saved).map((x) => x.name)).toEqual(["Hubble"]);
+    expect(second.body.data.unavailable).toEqual([]);
+    expect(second.body.notices).toEqual([{ level: "warning", text: "CelesTrak didn’t answer for Hubble; using the copy this site saved 5 h ago." }]);
+    // The failure never replaces the good copy.
+    expect(cache.entries.get(`${INTERNAL_GP_PATH}/20580`)?.storedAt).toBe(t0);
+
+    // Within 10 minutes the brief cache answers; afterwards only Hubble is asked again (the others are fresh).
+    vi.setSystemTime(t0 + 5 * 3_600_000 + 5 * 60_000);
+    asked = stub({});
+    await cache.get();
+    expect(asked).toEqual([]);
+    vi.setSystemTime(t0 + 5 * 3_600_000 + 11 * 60_000);
+    const third = await cache.get();
+    expect(asked).toEqual([20580]);
+    expect(third.res.headers.get("cache-control")).toBe("public, max-age=7200");
+    expect(third.body.data.satellites.some((x) => x.saved)).toBe(false);
+  });
+
+  it("stops using a saved copy once its elements are more than 3 days old", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.UTC(2026, 10, 1, 6);
+    vi.setSystemTime(t0);
+    const cache = workersCache();
+    stub({});
+    await cache.get();
+    const down = { 25544: () => new Response("", { status: 522 }), 48274: () => new Response("", { status: 522 }), 20580: () => new Response("", { status: 522 }) };
+    // Epochs: ISS 05:00, Tiangong 00:08, Hubble 02:56 on 1 Nov. On 4 Nov 04:00 only the ISS copy is within 3 days.
+    vi.setSystemTime(Date.UTC(2026, 10, 4, 4));
+    stub(down);
+    const { res, body } = await cache.get();
+    expect(res.status).toBe(200);
+    expect(body.data.satellites.map((x) => [x.name, x.saved])).toEqual([["ISS", true]]);
+    expect(body.data.unavailable.map((u) => [u.name, u.kind, u.reason])).toEqual([
+      ["Tiangong", "failed", expect.stringContaining("saved copy is more than 3 days old")],
+      ["Hubble", "failed", expect.stringContaining("saved copy is more than 3 days old")],
+    ]);
+    vi.setSystemTime(Date.UTC(2026, 10, 4, 6));
+    stub(down);
+    const later = await cache.get();
+    expect(later.res.status).toBe(502);
+    expect(later.res.headers.get("cache-control")).toBe("public, max-age=600");
+  });
+
+  it("answers the internal route only for listed objects, never caches its failures, and never forwards it from outside", async () => {
+    stub({ 20580: () => new Response("", { status: 522 }) });
+    const ok = await handleApi(new Request(`https://example.test${INTERNAL_GP_PATH}/25544`), env);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("cache-control")).toBe("public, max-age=7200, stale-if-error=259200");
+    const failed = await handleApi(new Request(`https://example.test${INTERNAL_GP_PATH}/20580`), env);
+    expect(failed.status).toBe(502);
+    expect(failed.headers.get("cache-control")).toBe("no-store");
+    expect((await handleApi(new Request(`https://example.test${INTERNAL_GP_PATH}/99999`), env)).status).toBe(404);
+    expect((await handleApi(new Request("https://example.test/api/internal/other"), env)).status).toBe(404);
+    expect(canonicalApiPath(new URL(`https://example.test${INTERNAL_GP_PATH}/25544`))).toBeNull();
   });
 
   it("flags stale elements without making the answer uncacheable", async () => {
