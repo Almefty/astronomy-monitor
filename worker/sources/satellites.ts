@@ -1,23 +1,12 @@
 import type { ApiErrorBody, SatelliteElements, SatelliteOmm, SatellitesData, UpstreamCall } from "../../shared/contract";
+import { listNames, SATELLITE_LIST } from "../../shared/spacecraft";
 import { SourceError, type Upstream } from "../lib/upstream";
 import { num } from "../lib/util";
 import type { SourceModule } from "./types";
 
 const GP = "https://celestrak.org/NORAD/elements/gp.php";
 
-/**
- * The spacecraft the "Sky tonight" panel predicts passes for. The one place to add or remove one.
- *
- * `stdMag` is the standard magnitude (1,000 km range, half illuminated) from Mike McCants' qs.mag
- * file, as carried in Stellarium's satellite catalogue (plugins/Satellites/resources/satellites.json,
- * updated 2026-06-24). These are rough: real brightness depends on attitude and solar panels, and
- * Tiangong's value may predate its 2022 modules (likely too faint).
- */
-export const SATELLITE_LIST: readonly { id: number; name: string; stdMag: number }[] = [
-  { id: 25544, name: "ISS", stdMag: -2.5 },
-  { id: 48274, name: "Tiangong", stdMag: 1.87 },
-  { id: 20580, name: "Hubble", stdMag: 1.5 },
-];
+export { SATELLITE_LIST };
 
 /** Elements older than this are flagged: SGP4 errors grow to minutes within a week or two. */
 export const STALE_AFTER_DAYS = 7;
@@ -223,6 +212,14 @@ async function loadOne(internal: (path: string) => Promise<Response>, upstream: 
   return { sat, kind: "ok", omm, fetchedAt: body.fetchedAt, saved };
 }
 
+/** Why no spacecraft could be loaded, naming them all (never one raw upstream error). */
+export function totalFailureMessage(failed: string[], missing: string[]): string {
+  const parts: string[] = [];
+  if (failed.length) parts.push(`Orbits for ${listNames(failed)} couldn’t be loaded from CelesTrak.`);
+  if (missing.length) parts.push(`CelesTrak has no usable orbital elements for ${listNames(missing)} right now.`);
+  return parts.join(" ") || "CelesTrak returned no usable orbital elements.";
+}
+
 export const satellitesSource: SourceModule<"satellites"> = {
   id: "satellites",
   title: "Sky tonight (spacecraft orbital elements)",
@@ -269,13 +266,13 @@ export const satellitesSource: SourceModule<"satellites"> = {
     }
 
     if (!satellites.length) {
-      // Cached for FAILURE_MAX_AGE (see above), so an outage isn't re-requested by every visitor.
-      throw firstError ?? new SourceError("parse", "CelesTrak returned no usable orbital elements.");
+      // Cached for FAILURE_MAX_AGE (see above), so an outage isn't re-requested by every visitor. The message
+      // names every spacecraft and is shown in the panel as is; each call's own status is in its request log.
+      throw new SourceError(firstError?.kind ?? "parse", totalFailureMessage(failed, missing));
     }
-    const names = (list: string[]) => list.join(" and ");
     if (failed.length) {
       // A warning: this partial answer is cached for FAILURE_MAX_AGE, not the full two hours.
-      notices.push({ level: "warning", text: `Orbital elements for ${names(failed)} couldn’t be loaded from CelesTrak this time.` });
+      notices.push({ level: "warning", text: `Orbital elements for ${listNames(failed)} couldn’t be loaded from CelesTrak this time.` });
     }
     for (const s of saved) {
       // A warning too: the answer is cached briefly, so fresh elements replace the copy soon after CelesTrak recovers.
@@ -286,7 +283,7 @@ export const satellitesSource: SourceModule<"satellites"> = {
     // its next update, so it is "info" and the answer keeps the full cache lifetime: one persistently
     // missing object mustn't make every visitor re-ask CelesTrak for all of them.
     if (missing.length) {
-      notices.push({ level: "info", text: `CelesTrak has no usable orbital elements for ${names(missing)} right now; no passes are predicted for ${missing.length > 1 ? "them" : "it"}.` });
+      notices.push({ level: "info", text: `CelesTrak has no usable orbital elements for ${listNames(missing)} right now; no passes are predicted for ${missing.length > 1 ? "them" : "it"}.` });
     }
     // Stale elements are flagged as "info", not "warning": a warning would cut the cache lifetime to
     // FAILURE_MAX_AGE, and re-downloading can't make CelesTrak's elements newer (its policy asks for

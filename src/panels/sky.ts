@@ -1,9 +1,10 @@
 import type { SatellitesData } from "../../shared/contract";
+import { listNames } from "../../shared/spacecraft";
 import {
   browserTimeZone, compassPoint, moonPhase, nightDate, nightEvents, PRESET_PLACES, roundCoordinate, skyPosition, SKY_PLANETS, timeZoneOffset,
   toObserver, type NightEvent, type Observer, type SkyPlanet,
 } from "../../shared/sky";
-import { ApiError, fetchSource, isRateLimited } from "../core/api";
+import { fetchSource } from "../core/api";
 import { clear, h, icon, s } from "../core/dom";
 import { age, utc } from "../core/format";
 import { ICONS } from "../core/icons";
@@ -11,7 +12,9 @@ import type { PanelDefinition, PanelResult, RenderContext } from "../core/panel"
 import { load as loadStored, remove as removeStored, save as saveStored } from "../core/storage";
 // Types only: satellite.js (inside passes.ts) is loaded with import() when there is something to predict.
 import type { PassPrediction, VisiblePass } from "../viz/passes";
-import { isSatelliteElements, loadElements, SAVED_ELEMENTS_KEY, savedCopyNote, type SavedIo } from "../viz/sky-elements";
+import {
+  CELESTRAK_DIDNT_ANSWER, isSatelliteElements, loadElements, orbitsLine, orbitsResult, SAVED_ELEMENTS_KEY, type SavedIo, type SkyData,
+} from "../viz/sky-elements";
 import {
   dayLabel, fmtMag, formatCoords, formatLatLonInput, GLARE_ELONGATION, hhmm, LOCATION_KEY, parseLatLon, parseLocation, passTimes,
   solarOffsetHours, utcOffsetLabel, type SkyLocation,
@@ -26,17 +29,7 @@ const DAY = 86_400_000;
 /** How many passes the list shows before "Show all". */
 const PASSES_SHOWN = 6;
 
-export interface SkyData {
-  /** Spacecraft orbital elements (CelesTrak), or null until the visitor loads them. */
-  satellites: SatellitesData | null;
-  /** Why the last load of the elements failed (the rest of the panel keeps working). */
-  error: { message: string; hint: string | null } | null;
-  /**
-   * Spacecraft whose elements come from this browser's saved copy (src/viz/sky-elements.ts) because the
-   * server couldn't load them this time. Optional: snapshots from before 2026-11-03 don't have it.
-   */
-  fromBrowser?: number[];
-}
+export type { SkyData };
 
 /* ------------------------------------------------------------------ */
 /* Location (kept in this browser only)                                */
@@ -429,7 +422,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       const det = h(
         "details",
         { class: "sky-hidden-planets" },
-        h("summary", null, h("span", { class: "name" }, visible.length ? "Not visible tonight: " : "No planet is visible tonight: "), h("span", { class: "sub" }, listText(hidden.map((p) => p.name)))),
+        h("summary", null, h("span", { class: "name" }, visible.length ? "Not visible tonight: " : "No planet is visible tonight: "), h("span", { class: "sub" }, listNames(hidden.map((p) => p.name)))),
         h("ul", { class: "rank-list sky-planets" }, hidden.map((p) => planetRow(p, tz))),
       );
       det.open = view.hiddenPlanetsOpen;
@@ -641,7 +634,7 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       svg.replaceChildren(...parts, ...placeLabels());
       svg.setAttribute(
         "aria-label",
-        `Sky dome at ${hhmm(t, tz)}: ${names.length ? `${listText(names)} above the horizon` : "no Sun, Moon or planet above the horizon"}. The planet and pass lists give the same information as text.`,
+        `Sky dome at ${hhmm(t, tz)}: ${names.length ? `${listNames(names)} above the horizon` : "no Sun, Moon or planet above the horizon"}. The planet and pass lists give the same information as text.`,
       );
     }
 
@@ -690,8 +683,8 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
     box.append(head, body);
     const { satellites, error } = result.data;
     /** The section's own button for loading the orbits: while it shows, the header's ↻ (same action) is hidden. */
-    const loadButton = (label: string) => {
-      const b = h("button", { type: "button", class: "btn btn-small" }, icon(ICONS.refresh), label);
+    const loadButton = (label: string, quiet = false) => {
+      const b = quiet ? h("button", { type: "button", class: "linklike" }, label) : h("button", { type: "button", class: "btn btn-small" }, icon(ICONS.refresh), label);
       b.addEventListener("click", () => {
         b.disabled = true;
         b.classList.add("is-busy");
@@ -702,7 +695,12 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       return b;
     };
 
-    if (error) {
+    // Saved orbits (or fresh ones) cover at least one spacecraft: one neutral line instead of an error box.
+    const line = satellites ? orbitsLine(satellites, result.data.fromBrowser ?? [], error?.lead ?? CELESTRAK_DIDNT_ANSWER) : null;
+    if (line) {
+      body.append(h("p", { class: "sky-note sky-saved-note" }, line, " ", loadButton("Try again", true)));
+    } else if (error) {
+      // Nothing can be predicted at all.
       const retry = loadButton("Try again");
       body.append(
         h(
@@ -785,14 +783,12 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
       if (sat.error) list.append(h("p", { class: "sky-note" }, `${sat.name}: ${sat.error}`));
     }
     const sats = result.data.satellites!;
-    // Saved copies standing in for CelesTrak, said plainly per spacecraft.
-    const fromBrowser = new Set(result.data.fromBrowser ?? []);
-    for (const x of sats.satellites) {
-      const note = savedCopyNote(x, fromBrowser.has(x.id), !!result.data.error, now);
-      if (note) list.append(h("p", { class: "sky-note" }, note));
+    // Failed spacecraft and saved copies are in the section's one line (orbitsLine); here only the ones
+    // CelesTrak has no usable elements for (said in plain words, not its answer).
+    for (const u of sats.unavailable) {
+      if (u.kind === "missing") list.append(h("p", { class: "sky-note" }, `${u.name}: CelesTrak has no usable orbit for it right now.`));
     }
-    for (const u of sats.unavailable) list.append(h("p", { class: "sky-note" }, `${u.name}: ${u.reason}`));
-    const names = listText(sats.satellites.map((x) => x.name));
+    const names = listNames(sats.satellites.map((x) => x.name));
     if (!upcoming.length) {
       list.append(
         h(
@@ -927,11 +923,6 @@ function render(root: HTMLElement, result: PanelResult<SkyData>, ctx: RenderCont
   };
 }
 
-function listText(items: string[]): string {
-  if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-}
-
 /* ------------------------------------------------------------------ */
 /* Definition                                                          */
 /* ------------------------------------------------------------------ */
@@ -960,23 +951,8 @@ export const skyPanel: PanelDefinition<SkyData> = {
     const io: SavedIo = { read: () => loadStored(SAVED_ELEMENTS_KEY), write: (store) => saveStored(SAVED_ELEMENTS_KEY, store) };
     const on = prev?.data.satellites ? { data: prev.data.satellites, fetchedAt: prev.fetchedAt } : null;
     const out = await loadElements(() => fetchSource("satellites", {}, signal), io, on);
-    if (out.ok) {
-      const env = out.envelope;
-      return { data: { satellites: out.data, error: null, fromBrowser: out.fromBrowser }, fetchedAt: env.fetchedAt, upstream: env.upstream, notices: env.notices };
-    }
-    const err = out.error;
-    if (signal.aborted) throw err;
-    // The orbits failed: show the saved copies (if any) and say so inline, so the Sun, Moon and planets
-    // stay on screen. "Refresh all" still counts this as a failure.
-    const api = err instanceof ApiError ? err : null;
-    const message = isRateLimited(err) ? "Too many requests to this site; try again in a minute." : (api?.message ?? (err as Error)?.message ?? "Unknown error.");
-    return {
-      data: { satellites: out.data, error: { message, hint: api?.body?.error.hint ?? null }, fromBrowser: out.fromBrowser },
-      fetchedAt: out.fetchedAt ?? new Date().toISOString(),
-      upstream: api?.body?.upstream ?? [],
-      notices: [],
-      failed: "Spacecraft orbits failed — see below",
-    };
+    if (!out.ok && signal.aborted) throw out.error;
+    return orbitsResult(out);
   },
 
   render,
@@ -1014,7 +990,7 @@ export const skyPanel: PanelDefinition<SkyData> = {
       return dark ? skyPosition(id, now, obs).alt >= MIN_PLANET_ALT : true;
     }).map((id) => BODY_NAMES[id as SkyPlanet]);
     const moon = `Moon ${pct(t.moon.phase.illuminated)}`;
-    const planetText = planets.length ? `${listText(planets)} ${dark ? "up" : "tonight"}` : dark ? "no bright planet up" : "no bright planet tonight";
+    const planetText = planets.length ? `${listNames(planets)} ${dark ? "up" : "tonight"}` : dark ? "no bright planet up" : "no bright planet tonight";
     const where = loc.name ?? "your location";
     const pred = passCache && result.data.satellites && passCache.key === passCacheKey(loc, result.fetchedAt, t.date) ? passCache.prediction : null;
     const next = pred?.passes.find((p) => p.end.ms > now);

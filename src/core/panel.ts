@@ -17,6 +17,12 @@ export interface PanelResult<D> {
    * result isn't saved.
    */
   failed?: string;
+  /**
+   * Header text in place of "Updated …", shown without the failure styling, for a result that is usable
+   * but not fully fresh (the sky panel's "Using saved orbits"). Takes precedence over `failed` in the
+   * header; "Refresh all" still counts a `failed` result as failed.
+   */
+  stamp?: string;
 }
 
 export interface Summary {
@@ -223,7 +229,7 @@ export class PanelHost<D = unknown> {
     try {
       const result = await this.def.load(controller.signal, { ...this.params, ...extraParams }, this.result);
       if (controller.signal.aborted) return this.superseded(token);
-      this.liveError = result.failed ?? null;
+      this.liveError = result.stamp ? null : (result.failed ?? null);
       this.show(result, false);
       if (result.failed) return false;
       if (this.def.persist !== false && !result.notices.some((n) => n.text.startsWith("SAMPLE DATA")) && !extraParams.sample) save(`snap:${this.def.id}`, result);
@@ -275,8 +281,8 @@ export class PanelHost<D = unknown> {
     }
     const at = this.result.fetchedAt;
     const ageMs = Date.now() - new Date(at).getTime();
-    this.stamp.textContent = this.liveError ?? `Updated ${localTime(at)} · ${age(at)} ago`;
-    this.stamp.classList.toggle("is-stale", ageMs > 6 * 3600_000 || !!this.liveError);
+    this.stamp.textContent = this.liveError ?? this.result.stamp ?? `Updated ${localTime(at)} · ${age(at)} ago`;
+    this.stamp.classList.toggle("is-stale", !!this.liveError || (!this.result.stamp && ageMs > 6 * 3600_000));
     this.stamp.title = new Date(at).toString();
   }
 
