@@ -5,6 +5,7 @@ import { SourceError, Upstream } from "./lib/upstream";
 import { streamCatalog } from "./sources/exoplanets";
 import { fetchCircular } from "./sources/gcn";
 import { getSource, SOURCES } from "./sources/index";
+import { celestrakObject, INTERNAL_GP_PATH } from "./sources/satellites";
 
 /** Cache lifetimes (seconds) for the routes that aren't a SourceModule. */
 export const MAX_AGE = {
@@ -72,10 +73,21 @@ export function canonicalApiPath(url: URL): string | null {
   return `/api/sources/${source.id}${canonicalQuery(source.params, url.searchParams)}`;
 }
 
-export async function handleApi(request: Request, env: Env): Promise<Response> {
+/** Fetches an internal route through the cached `Api` entrypoint (production) or directly (tests). */
+export type Loopback = (request: Request) => Promise<Response>;
+
+export async function handleApi(request: Request, env: Env, loopback?: Loopback): Promise<Response> {
   const url = new URL(request.url);
   if (request.method !== "GET" && request.method !== "HEAD") return json({ error: "Method not allowed" }, 405);
   const path = url.pathname.replace(/\/+$/, "");
+  const self: Loopback = loopback ?? ((req) => handleApi(req, env));
+
+  // Internal routes: reachable only through the loopback (canonicalApiPath never forwards them).
+  if (path.startsWith(`${INTERNAL_GP_PATH}/`)) {
+    const { status, body, cacheControl: cc } = await celestrakObject(path.slice(INTERNAL_GP_PATH.length + 1), new Upstream());
+    return json(body, status, 0, { "cache-control": cc });
+  }
+  if (path.startsWith("/api/internal/")) return json({ error: "Not found" }, 404);
 
   if (path === "/api/status") {
     const body: StatusResponse = {
@@ -123,6 +135,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       notices,
       noCache: () => (cacheable = false),
       cacheFor: (seconds) => (maxAge = Math.min(maxAge, seconds)),
+      internal: (p) => self(new Request(new URL(p, url.origin), { headers: { accept: "application/json" } })),
     });
     const body: Envelope<unknown> = { source: source.id, fetchedAt: new Date().toISOString(), data, upstream: upstream.calls, notices };
     // A partial failure (a failed upstream call, a warning) is served but not cached, so the next

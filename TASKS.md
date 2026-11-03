@@ -34,6 +34,9 @@ tonight's events, Moon, planets, spacecraft passes, sky dome, "Right now" summar
 yet (see PR 3 below for what was and wasn't verified).
 **2026-11-03 (v4, PR 3 layout pass):** the sky panel simplified without removing features (see "PR 3 layout pass"
 below). 188 unit tests pass.
+**2026-11-03 (v4, CelesTrak fallback):** passes keep working when CelesTrak fails from Cloudflare (HTTP 522
+after ~20 s): saved elements in the browser and, best effort, on the server; timeout 25 → 12 s (see "CelesTrak
+fallback" below). 199 unit tests pass. Server copy not yet verified on Cloudflare.
 **2026-11-01 (v4, PR 3 review fixes):** nine fixes from the maintainer's review, incl. CelesTrak requests in parallel
 (see "PR 3 review fixes" below). 187 unit tests pass.
 
@@ -178,6 +181,62 @@ below). 188 unit tests pass.
    the response time on the next Workers Builds preview.
 - `npm run check` passes (187 tests); production preview re-checked at 360 px light, 375 px dark and 1280 px, no
   horizontal scroll, no console errors.
+
+## CelesTrak fallback (2026-11-03)
+From Cloudflare, CelesTrak often answers HTTP 522 after ~20 s (from elsewhere ~1 s), so the live panel regularly
+said "Orbital elements for Hubble couldn’t be loaded…" or lost all three spacecraft.
+1. **Browser copy (`src/viz/sky-elements.ts`)**: the last good elements per spacecraft in localStorage (`sky:elements`
+   via `core/storage.ts`, newest epoch wins). When the server can't load a spacecraft (`unavailable[].kind: "failed"`;
+   new field, missing on older answers = failed) or the whole request fails, its passes are predicted from the copy
+   if the **elements' epoch** is at most 3 days old (stricter than the save time: the epoch is what limits SGP4's
+   accuracy). Older copies are dropped and the panel shows the usual message. The passes section says it per
+   spacecraft: "Hubble: orbit from 5 h ago (saved in this browser), CelesTrak didn’t answer." (whole request
+   failed: "…, the latest orbits couldn’t be loaded.", under the error box). If storage is blocked, the elements on
+   screen are used. `CelesTrak has no elements` (`kind: "missing"`) is not filled in. A whole failure is still
+   `PanelResult.failed`; a filled partial answer isn't. Logic in `loadElements()`, tested with an in-memory store
+   (`test/sky-elements.test.ts`, 8 tests); the panel only injects `core/storage.ts`.
+2. **Server copy (best effort, not yet verified on Cloudflare)**: Cloudflare's Cache API doesn't work on workers.dev
+   (forum answer; the docs only promise it on custom domains), so it uses **Workers Cache's `stale-if-error`**
+   instead. Cloudflare's Workers Cache configuration page (found via search, 2026-11-03; developers.cloudflare.com
+   isn't reachable from the cloud container, so not read directly) says a cached entry is served when the Worker
+   throws, times out or answers 5xx while revalidating it, within `stale-if-error`; `s-maxage`, `must-revalidate`
+   or `proxy-revalidate` disable it; without the directive the default is to serve stale indefinitely.
+   - Each object has an internal route `/api/internal/celestrak/<id>` (`celestrakObject()` in
+     `worker/sources/satellites.ts`), fetched by the `satellites` source through `SourceContext.internal`, which
+     goes back through `ctx.exports.Api` (the cached entrypoint), so each object has its own cache entry. In tests
+     and without a loopback, `handleApi` calls itself directly (no cache). `canonicalApiPath` never forwards
+     `/api/internal/*`, so the front Worker answers 404 for them.
+   - Success: `public, max-age=7200, stale-if-error=259200`. Failure: 502 `no-store` (never replaces the copy).
+     "No GP data found": 200, `max-age=7200` without `stale-if-error`.
+   - The aggregate recognises a saved copy by the copy's own `fetchedAt` (older than 2 h + 5 min can only come
+     from `stale-if-error`), marks it `saved: true` with `fetchedAt`, adds a warning ("CelesTrak didn’t answer for
+     Hubble; using the copy this site saved 5 h ago.") and so caches the answer 600 s. A saved copy whose epoch is
+     more than 3 days old is treated as a failure. Every object now carries `fetchedAt`.
+   - CelesTrak's policy is unchanged or better: the aggregate's 600-s failure cache still limits retries to one per
+     object per 10 minutes per data centre, and after a partial failure only the failed object is asked again (the
+     others' internal entries are still fresh for 2 h; before, all three were re-asked).
+   - Cost: a cache miss on the aggregate is now 1 + 3 Worker requests (each internal call counts), still far below
+     the 100k/day quota; CPU is three small JSON parses.
+   - Tested with a model of Workers Cache (`workersCache()` in `test/satellites.test.ts`: max-age, no-store,
+     `stale-if-error` on 5xx): saved copy served and flagged after a 522, the failure doesn't replace it, only the
+     failed object is asked again after 10 min, 3-day epoch limit, internal route not forwardable.
+   - Limits: Cloudflare may evict a rarely used entry long before 3 days; the cache is per data centre; a deploy
+     that changes the Worker code starts a new cache (TASKS "Hardening"), so the server copy is lost on each deploy.
+   - **To verify on the preview URL / after deploy:** `/api/sources/satellites` lists each object with `fetchedAt`
+     and, when it came from the server copy, `"saved": true` (plus the warning notice). It needs a success first,
+     then a CelesTrak failure more than 2 h later in the same data centre. If `saved` never appears while the panel
+     shows CelesTrak failures (`unavailable[].kind: "failed"`, HTTP 522/timeouts in `upstream`), `stale-if-error` or
+     the loopback cache doesn't work on workers.dev: remove the internal route and say so here.
+3. **Timeout 25 → 12 s** (`REQUEST_TIMEOUT_MS`): healthy answers take ~1 s, a 522 arrives after ~20 s. Both outcomes
+   cost the same 10-minute failure cache, so giving up earlier only shortens the wait.
+4. The partial-failure warning no longer says "no passes are predicted for it" (the browser may still predict them);
+   the passes section says what happened per spacecraft.
+- Verified on the production preview (Playwright Chromium, satellites answer intercepted, saved copies seeded):
+  partial answer (Tiangong server-saved, Hubble failed and filled from the browser) and total failure (HTTP 502, all
+  three from the browser) at 1280 px light, 375 px dark, 360 px light; no horizontal scroll, no console errors.
+- Observation: the aggregate `/api/sources/satellites` sends no `stale-if-error`, so by Cloudflare's documented
+  default an expired aggregate entry may already be served stale when the Worker answers 502. That it didn't help
+  in practice fits eviction (low traffic) and per-colo caches. Left unchanged.
 
 ## PR 3 layout pass (2026-11-03)
 The maintainer found the panel cluttered, especially on phones. Same features, fewer controls:

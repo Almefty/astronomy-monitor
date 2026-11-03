@@ -7,11 +7,14 @@ import { allowRequest, RATE_LIMIT } from "./lib/ratelimit";
 /**
  * The API behind Workers Cache (`exports.Api.cache` in wrangler.jsonc). A cache hit is answered
  * by Cloudflare without running this code or calling any upstream; lifetimes come from each
- * response's Cache-Control (see api.ts).
+ * response's Cache-Control (see api.ts). Requests from the front Worker and the API's own internal
+ * routes (`/api/internal/*`, see `handleApi`) both come through `ctx.exports.Api`, so both are cached.
  */
 export class Api extends WorkerEntrypoint<Env> {
   override fetch(request: Request): Promise<Response> {
-    return handleApi(request, this.env);
+    // Internal routes (CelesTrak's per-object copies) are fetched back through this entrypoint's
+    // loopback, so they get their own Workers Cache entries.
+    return handleApi(request, this.env, (req) => this.ctx.exports.Api.fetch(req));
   }
 }
 

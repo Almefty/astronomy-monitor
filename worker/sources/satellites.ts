@@ -1,4 +1,4 @@
-import type { SatelliteElements, SatelliteOmm, SatellitesData } from "../../shared/contract";
+import type { ApiErrorBody, SatelliteElements, SatelliteOmm, SatellitesData, UpstreamCall } from "../../shared/contract";
 import { SourceError, type Upstream } from "../lib/upstream";
 import { num } from "../lib/util";
 import type { SourceModule } from "./types";
@@ -93,18 +93,68 @@ export function epochAgeDays(epochMs: number, now: number): number {
 }
 
 /**
- * Per-request timeout. CelesTrak was seen answering in 5–10 s per request (2026-11); the requests run in
- * parallel, so this bounds the whole load. Generous, because a timeout costs a 10-minute failure cache.
+ * Per-request timeout. Healthy CelesTrak answers take ~1 s; from Cloudflare it often fails with HTTP 522
+ * after ~20 s (seen 2026-11). The requests run in parallel, so this bounds the whole load, and a timeout
+ * ends it before that 522 would arrive (both cost the same 10-minute failure cache).
  */
-export const REQUEST_TIMEOUT_MS = 25_000;
+export const REQUEST_TIMEOUT_MS = 12_000;
+
+/*
+ * Saved copies (server side). Each object is fetched through its own internal route,
+ * `/api/internal/celestrak/<id>`, called back through the cached `Api` entrypoint (`SourceContext.internal`),
+ * so each has its own Workers Cache entry:
+ *   - success: `public, max-age=7200, stale-if-error=259200`. Fresh for CelesTrak's 2-hour cycle; afterwards,
+ *     if the Worker answers 5xx when Cloudflare revalidates it, Cloudflare serves the old entry instead, for up
+ *     to 3 more days (Workers Cache honours `stale-if-error` on Worker errors; `s-maxage` would disable it).
+ *   - failure: HTTP 502, `no-store`, so it never replaces the good copy.
+ * The aggregate `/api/sources/satellites` still caches failed and partial answers for FAILURE_MAX_AGE, so the
+ * internal routes (and CelesTrak) are asked at most once per object per 10 minutes per data centre while
+ * CelesTrak fails, never more than before. A copy is recognised as saved by its own `fetchedAt`: an entry
+ * older than MAX_AGE can only come from `stale-if-error`.
+ * Best effort: Cloudflare may evict a rarely used entry early, the cache is per data centre, and a deploy that
+ * changes the Worker code starts a new cache. The browser keeps its own copy as well (src/viz/sky-elements.ts).
+ */
+export const INTERNAL_GP_PATH = "/api/internal/celestrak";
+/** How long a saved copy may stand in for CelesTrak, counted from the elements' epoch. */
+export const SAVED_MAX_AGE_DAYS = 3;
+const STALE_IF_ERROR = SAVED_MAX_AGE_DAYS * 86_400;
+/** An entry this much older than MAX_AGE is a saved copy (slack for clocks and slow revalidation). */
+const SAVED_SLACK_MS = 5 * 60_000;
+
+/** The internal route's body: one object's elements (or why there are none), as downloaded. */
+export interface CelestrakObject {
+  id: number;
+  /** When the Worker asked CelesTrak. */
+  fetchedAt: string;
+  omm: SatelliteOmm | null;
+  /** Why `omm` is null (CelesTrak answered without usable elements). */
+  reason?: string;
+  upstream: UpstreamCall[];
+}
+
+type Sat = (typeof SATELLITE_LIST)[number];
+
+/** One object's elements from CelesTrak as the internal route's answer; never throws. */
+export async function celestrakObject(idText: string, upstream: Upstream): Promise<{ status: number; body: unknown; cacheControl: string }> {
+  const sat = SATELLITE_LIST.find((x) => String(x.id) === idText);
+  if (!sat) return { status: 404, body: { error: "Not found" }, cacheControl: "no-store" };
+  const fetchedAt = new Date().toISOString();
+  const o = await fetchOne(upstream, sat);
+  if (o.kind === "error") {
+    const body: ApiErrorBody = { source: "satellites", fetchedAt, error: { kind: o.error.kind, message: o.error.message }, upstream: upstream.calls };
+    return { status: 502, body, cacheControl: "no-store" };
+  }
+  const body: CelestrakObject = { id: sat.id, fetchedAt, omm: o.kind === "ok" ? o.omm : null, ...(o.kind === "missing" ? { reason: o.reason } : {}), upstream: upstream.calls };
+  return { status: 200, body, cacheControl: o.kind === "ok" ? `public, max-age=${MAX_AGE}, stale-if-error=${STALE_IF_ERROR}` : `public, max-age=${MAX_AGE}` };
+}
 
 type Outcome =
-  | { sat: (typeof SATELLITE_LIST)[number]; kind: "ok"; omm: SatelliteOmm }
-  | { sat: (typeof SATELLITE_LIST)[number]; kind: "missing"; reason: string }
-  | { sat: (typeof SATELLITE_LIST)[number]; kind: "error"; error: SourceError };
+  | { sat: Sat; kind: "ok"; omm: SatelliteOmm; fetchedAt?: string; saved?: boolean }
+  | { sat: Sat; kind: "missing"; reason: string }
+  | { sat: Sat; kind: "error"; error: SourceError };
 
-/** One object's elements; never throws (failures become an outcome). */
-async function fetchOne(upstream: Upstream, sat: (typeof SATELLITE_LIST)[number]): Promise<Outcome> {
+/** One object's elements straight from CelesTrak; never throws (failures become an outcome). */
+async function fetchOne(upstream: Upstream, sat: Sat): Promise<Outcome> {
   const url = `${GP}?CATNR=${sat.id}&FORMAT=JSON`;
   let text: string;
   try {
@@ -129,6 +179,50 @@ async function fetchOne(upstream: Upstream, sat: (typeof SATELLITE_LIST)[number]
   return { sat, kind: "ok", omm };
 }
 
+function isErrorBody(x: unknown): x is ApiErrorBody {
+  const e = (x as ApiErrorBody | null)?.error;
+  return !!e && typeof e === "object" && typeof e.message === "string" && typeof e.kind === "string";
+}
+
+function isObjectBody(x: unknown, id: number): x is CelestrakObject {
+  const b = x as CelestrakObject | null;
+  return !!b && b.id === id && typeof b.fetchedAt === "string" && Number.isFinite(Date.parse(b.fetchedAt)) && Array.isArray(b.upstream) && (b.omm === null || (!!b.omm && typeof b.omm === "object"));
+}
+
+/**
+ * One object through its internal route (cached, with the saved copy behind it); never throws.
+ * Upstream calls of the route's own run are added to `upstream`, so the panel lists them as before.
+ */
+async function loadOne(internal: (path: string) => Promise<Response>, upstream: Upstream, sat: Sat, now: number): Promise<Outcome> {
+  const name = `CelesTrak GP elements (${sat.name})`;
+  let body: unknown = null;
+  let status = 0;
+  try {
+    const res = await internal(`${INTERNAL_GP_PATH}/${sat.id}`);
+    status = res.status;
+    body = await res.json().catch(() => null);
+  } catch (err) {
+    return { sat, kind: "error", error: new SourceError("internal", `${name}: ${String((err as Error)?.message ?? err)}`) };
+  }
+  if (status !== 200 || !isObjectBody(body, sat.id)) {
+    if (isErrorBody(body)) {
+      upstream.calls.push(...(body.upstream ?? []));
+      return { sat, kind: "error", error: new SourceError(body.error.kind, body.error.message) };
+    }
+    return { sat, kind: "error", error: new SourceError("internal", `${name}: unexpected internal answer (HTTP ${status}).`) };
+  }
+  const saved = now - Date.parse(body.fetchedAt) > MAX_AGE * 1000 + SAVED_SLACK_MS;
+  // A saved copy's calls are the old successful ones; the failed call that led to it isn't visible here.
+  if (!saved) upstream.calls.push(...body.upstream);
+  if (!body.omm) return { sat, kind: "missing", reason: body.reason ?? "CelesTrak has no current elements for it." };
+  const omm = slimOmm([body.omm], sat.id);
+  if (!omm) return { sat, kind: "error", error: new SourceError("parse", `${name}: the saved elements are unreadable.`) };
+  if (saved && epochAgeDays(ommEpochMs(omm.EPOCH)!, now) > SAVED_MAX_AGE_DAYS) {
+    return { sat, kind: "error", error: new SourceError("upstream", `${name}: CelesTrak didn’t answer, and the saved copy is more than ${SAVED_MAX_AGE_DAYS} days old.`) };
+  }
+  return { sat, kind: "ok", omm, fetchedAt: body.fetchedAt, saved };
+}
+
 export const satellitesSource: SourceModule<"satellites"> = {
   id: "satellites",
   title: "Sky tonight (spacecraft orbital elements)",
@@ -137,30 +231,38 @@ export const satellitesSource: SourceModule<"satellites"> = {
   maxAge: MAX_AGE,
   failureMaxAge: FAILURE_MAX_AGE,
 
-  async load({ upstream, now, notices }) {
+  async load({ upstream, now, notices, internal }) {
     // CATNR takes one catalog number per query (a list is rejected), so one small call per object
-    // (~420 bytes each). They run in parallel: CelesTrak can take 5–10 s per answer, and three in a row
-    // took ~24 s in production. Any failure (non-200 other than "No GP data found", timeout, network
-    // error) makes the whole answer a failure or a partial one, which is cached for FAILURE_MAX_AGE only,
-    // so after an error no request goes to CelesTrak from that data centre for 10 minutes (its usage
-    // policy asks clients to stop after a non-200). In parallel the other two calls are already on their
-    // way when one fails: at most two extra requests per error, not a retry.
-    const outcomes = await Promise.all(SATELLITE_LIST.map((sat) => fetchOne(upstream, sat)));
+    // (~420 bytes each), each through its own cached internal route (see INTERNAL_GP_PATH). They run in
+    // parallel: CelesTrak can take seconds per answer. Any failure (non-200 other than "No GP data found",
+    // timeout, network error) without a saved copy makes the whole answer a failure or a partial one, and
+    // a saved copy makes it partial too; both are cached for FAILURE_MAX_AGE only, so after an error no
+    // request goes to CelesTrak from that data centre for 10 minutes (its usage policy asks clients to stop
+    // after a non-200). In parallel the other calls are already on their way when one fails: at most two
+    // extra requests per error, not a retry.
+    const t = now.getTime();
+    const outcomes = await Promise.all(SATELLITE_LIST.map((sat) => loadOne(internal, upstream, sat, t)));
     const satellites: SatelliteElements[] = [];
     const unavailable: SatellitesData["unavailable"] = [];
     /** Objects CelesTrak answered for without usable elements (the same until its next update). */
     const missing: string[] = [];
-    /** Objects whose request failed (non-200, timeout, network). */
+    /** Objects whose request failed (non-200, timeout, network) with no saved copy. */
     const failed: string[] = [];
+    /** Objects served from the saved copy. */
+    const saved: { name: string; fetchedAt: string }[] = [];
     let firstError: SourceError | null = null;
     for (const o of outcomes) {
       if (o.kind === "ok") {
-        satellites.push({ id: o.sat.id, name: o.sat.name, stdMag: o.sat.stdMag, epoch: new Date(ommEpochMs(o.omm.EPOCH)!).toISOString(), omm: o.omm });
+        satellites.push({
+          id: o.sat.id, name: o.sat.name, stdMag: o.sat.stdMag, epoch: new Date(ommEpochMs(o.omm.EPOCH)!).toISOString(), omm: o.omm,
+          ...(o.fetchedAt ? { fetchedAt: o.fetchedAt } : {}), ...(o.saved ? { saved: true } : {}),
+        });
+        if (o.saved) saved.push({ name: o.sat.name, fetchedAt: o.fetchedAt! });
       } else if (o.kind === "missing") {
-        unavailable.push({ id: o.sat.id, name: o.sat.name, reason: o.reason });
+        unavailable.push({ id: o.sat.id, name: o.sat.name, reason: o.reason, kind: "missing" });
         missing.push(o.sat.name);
       } else {
-        unavailable.push({ id: o.sat.id, name: o.sat.name, reason: o.error.message });
+        unavailable.push({ id: o.sat.id, name: o.sat.name, reason: o.error.message, kind: "failed" });
         failed.push(o.sat.name);
         firstError ??= o.error;
       }
@@ -173,7 +275,12 @@ export const satellitesSource: SourceModule<"satellites"> = {
     const names = (list: string[]) => list.join(" and ");
     if (failed.length) {
       // A warning: this partial answer is cached for FAILURE_MAX_AGE, not the full two hours.
-      notices.push({ level: "warning", text: `Orbital elements for ${names(failed)} couldn’t be loaded from CelesTrak this time; no passes are predicted for ${failed.length > 1 ? "them" : "it"}.` });
+      notices.push({ level: "warning", text: `Orbital elements for ${names(failed)} couldn’t be loaded from CelesTrak this time.` });
+    }
+    for (const s of saved) {
+      // A warning too: the answer is cached briefly, so fresh elements replace the copy soon after CelesTrak recovers.
+      const h = Math.max(1, Math.round((t - Date.parse(s.fetchedAt)) / 3_600_000));
+      notices.push({ level: "warning", text: `CelesTrak didn’t answer for ${s.name}; using the copy this site saved ${h} h ago.` });
     }
     // An object CelesTrak answered for but has no usable elements is the same on every request until
     // its next update, so it is "info" and the answer keeps the full cache lifetime: one persistently
@@ -181,7 +288,6 @@ export const satellitesSource: SourceModule<"satellites"> = {
     if (missing.length) {
       notices.push({ level: "info", text: `CelesTrak has no usable orbital elements for ${names(missing)} right now; no passes are predicted for ${missing.length > 1 ? "them" : "it"}.` });
     }
-
     // Stale elements are flagged as "info", not "warning": a warning would cut the cache lifetime to
     // FAILURE_MAX_AGE, and re-downloading can't make CelesTrak's elements newer (its policy asks for
     // one download per update). The panel also compares each epoch with the current time itself.
