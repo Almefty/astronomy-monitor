@@ -238,6 +238,41 @@ said "Orbital elements for Hubble couldn’t be loaded…" or lost all three spa
   default an expired aggregate entry may already be served stale when the Worker answers 502. That it didn't help
   in practice fits eviction (low traffic) and per-colo caches. Left unchanged.
 
+## Saved orbits: calmer UI (2026-11-03)
+With CelesTrak failing and saved orbits covering the passes, the panel still looked broken: a red box quoting
+"CelesTrak GP elements (ISS) answered HTTP 522: error code: 522" (naming only the first spacecraft even when all
+three failed), the header "Spacecraft orbits failed — see below", and the same sentence repeated per spacecraft.
+1. **One neutral line** in the passes section whenever a spacecraft failed or uses a saved copy (browser or server)
+   and at least one can still be predicted: "CelesTrak didn’t answer; using saved orbits: ISS (17 h old), Tiangong
+   (16 h old). Hubble: no saved orbit." plus a small "Try again" text button (`.linklike`). Ages count from each
+   orbit's epoch. A failure without any copy while others are fresh: "CelesTrak didn’t answer for Tiangong, and
+   there’s no saved orbit for it." The lead says what failed: CelesTrak, "Too many requests to this site" (429) or
+   "The latest orbits couldn’t be loaded" (connection). `orbitsLine()` in `src/viz/sky-elements.ts`. The red box stays
+   only when nothing can be predicted. The per-spacecraft notes (`savedCopyNote`) are gone.
+2. **Header**: new `PanelResult.stamp` (`src/core/panel.ts`): header text shown without the failure styling, taking
+   precedence over `failed`. The sky panel sets "Using saved orbits" whenever a saved copy is used. A whole-request
+   failure still sets `failed`, so "Refresh all" lists the panel as failed (as agreed); a partial answer doesn't.
+3. **No upstream errors in the panel**: per-spacecraft failure reasons (`unavailable[].reason` of kind "failed")
+   are no longer printed; "missing" ones get a fixed sentence. The Worker's warning notices for this source (failed /
+   server-saved objects) are filtered out of the panel notices, since the line says the same (they still shorten
+   the cache to 600 s on the Worker). Each call's status (522, timeout) stays in the "Details" request log.
+4. **Total failure names every spacecraft**: the Worker throws `totalFailureMessage(failed, missing)` ("Orbits for
+   ISS, Tiangong and Hubble couldn’t be loaded from CelesTrak.") instead of the first object's error; the error kind
+   is still the first failure's, so the 600-s failure cache is unchanged. When the browser has no copy either, the
+   panel adds "No saved orbits from the last 3 days are available."
+5. `SATELLITE_LIST` moved to `shared/spacecraft.ts` (re-exported by the Worker) with `listNames()`, so the browser
+   can name the spacecraft it has no copy for after a whole failure (`fillFromSaved(null, …)` lists them as
+   `unavailable`).
+6. The panel's `load()` result is built by `orbitsResult()` (pure, in `src/viz/sky-elements.ts`): tests type-check
+   without the DOM library, so they can't import `src/panels/sky.ts`. `SkyData` moved there too.
+- Tests: `test/sky-load.test.ts` (new, 6: browser copies, nothing to predict, rate limit / offline, server copy in a
+  partial answer, a failure without copy, all fresh), `orbitsLine` cases in `test/sky-elements.test.ts`, the
+  total-failure message in `test/satellites.test.ts`. `npm run check` passes (207 tests).
+- Verified on the production preview (`vite preview`, satellites answer intercepted in Playwright Chromium, browser
+  copies seeded): browser copies for ISS + Tiangong after a 502, no copies (red box), server-saved Hubble in a
+  partial answer; 1280 px light/dark, 375 px light/dark, 360 px dark; header "Using saved orbits", no horizontal
+  scroll. Not yet checked on the deployed site (not merged).
+
 ## PR 3 layout pass (2026-11-03)
 The maintainer found the panel cluttered, especially on phones. Same features, fewer controls:
 1. **Location picker**: one primary "Use my location" button and a "Choose a city…" `<select>` (was six buttons).

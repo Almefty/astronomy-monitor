@@ -92,7 +92,9 @@ commands) and `TASKS.md` (state, known issues, lessons) first.
   `stale-if-error`). The aggregate flags such objects `saved: true` (with `fetchedAt`) and caches that answer
   600 s. Best effort (eviction, per data centre, reset per code deploy). The browser keeps its own copy too
   (`src/viz/sky-elements.ts`, key `sky:elements` via `core/storage.ts`). Both use a copy for at most 3 days
-  from the elements' epoch and say so per spacecraft in the passes section. Don't use the Cache API for this:
+  from the elements' epoch. The passes section says it in one neutral line (`orbitsLine()`; the header says "Using
+  saved orbits"); the red error box is only for when no spacecraft can be predicted, and raw upstream errors stay in
+  the "Details" request log. Don't use the Cache API for this:
   it doesn't work on workers.dev.
 
 ## Commands

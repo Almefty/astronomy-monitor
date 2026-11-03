@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Envelope, SatelliteElements, SatellitesData } from "../shared/contract";
 import {
-  fillFromSaved, loadElements, readSaved, rememberElements, SAVED_MAX_AGE_DAYS, savedCopyNote, type SavedIo, type SavedStore,
+  CELESTRAK_DIDNT_ANSWER, fillFromSaved, loadElements, orbitsLine, readSaved, rememberElements, SAVED_MAX_AGE_DAYS, type SavedIo, type SavedStore,
 } from "../src/viz/sky-elements";
 import { ommEpochMs, SATELLITE_LIST, slimOmm } from "../worker/sources/satellites";
 import ref from "./fixtures/satellites-reference.json";
@@ -86,12 +86,43 @@ describe("saved elements (pure)", () => {
     expect(fillFromSaved(null, {}, T0)).toBeNull();
   });
 
-  it("says plainly where a spacecraft's orbit comes from", () => {
-    const now = Date.parse(HUBBLE.epoch) + 5 * H;
-    expect(savedCopyNote(HUBBLE, true, false, now)).toBe("Hubble: orbit from 5 h ago (saved in this browser), CelesTrak didn’t answer.");
-    expect(savedCopyNote({ ...HUBBLE, saved: true }, false, false, now)).toBe("Hubble: orbit from 5 h ago (saved by this site’s server), CelesTrak didn’t answer.");
-    expect(savedCopyNote(HUBBLE, true, true, now + DAY)).toBe("Hubble: orbit from 29 h ago (saved in this browser), the latest orbits couldn’t be loaded.");
-    expect(savedCopyNote(HUBBLE, false, false, now)).toBeNull();
+  it("lists the spacecraft without a copy when the whole request failed", () => {
+    const store = rememberElements({}, { ...all(), satellites: [ISS] }, new Date(T0).toISOString(), T0);
+    const filled = fillFromSaved(null, store, T0 + H)!;
+    expect(filled.data.satellites.map((s) => s.name)).toEqual(["ISS"]);
+    expect(filled.data.unavailable.map((u) => [u.name, u.kind])).toEqual([["Tiangong", "failed"], ["Hubble", "failed"]]);
+  });
+
+  it("sums up failed and saved orbits in one neutral line, without upstream errors", () => {
+    // Whole request failed: the ISS and Tiangong from this browser, nothing for Hubble.
+    const now = Date.parse(ISS.epoch) + 17 * H; // Tiangong's epoch is 4 h 52 min older
+    const store = rememberElements({}, { ...all(), satellites: [ISS, TIANGONG] }, new Date(T0).toISOString(), T0);
+    const whole = fillFromSaved(null, store, now)!;
+    expect(orbitsLine(whole.data, whole.fromBrowser, CELESTRAK_DIDNT_ANSWER, now)).toBe(
+      "CelesTrak didn’t answer; using saved orbits: ISS (17 h old), Tiangong (22 h old). Hubble: no saved orbit.",
+    );
+    // The lead says what failed (e.g. this site's rate limit).
+    expect(orbitsLine(whole.data, whole.fromBrowser, "Too many requests to this site", now)).toMatch(/^Too many requests to this site; using saved orbits: ISS/);
+
+    // A partial answer with the server's saved copy for Hubble.
+    const serverSaved: SatellitesData = { ...all(), satellites: [ISS, TIANGONG, { ...HUBBLE, saved: true }] };
+    expect(orbitsLine(serverSaved, [], undefined, Date.parse(HUBBLE.epoch) + 5 * H)).toBe("CelesTrak didn’t answer; using saved orbits: Hubble (5 h old).");
+
+    // One failed without any copy, the others fresh: named, with the raw error left out.
+    const failedNoCopy: SatellitesData = {
+      ...all(), satellites: [ISS, HUBBLE],
+      unavailable: [{ id: 48274, name: "Tiangong", reason: "CelesTrak GP elements (Tiangong) answered HTTP 522: error code: 522", kind: "failed" }],
+    };
+    const line = orbitsLine(failedNoCopy, [], undefined, T0)!;
+    expect(line).toBe("CelesTrak didn’t answer for Tiangong, and there’s no saved orbit for it.");
+    expect(line).not.toMatch(/HTTP|522/);
+    // Answers without `kind` (older deploys) count as failed.
+    expect(orbitsLine({ ...failedNoCopy, unavailable: [{ id: 48274, name: "Tiangong", reason: "x" }] }, [], undefined, T0)).toContain("for Tiangong");
+
+    // Nothing to say: all fresh, or only "no elements at CelesTrak" (said per spacecraft), or nothing to predict.
+    expect(orbitsLine(all(), [], undefined, T0)).toBeNull();
+    expect(orbitsLine({ ...all(), satellites: [ISS], unavailable: [{ id: 48274, name: "Tiangong", reason: "none", kind: "missing" }] }, [], undefined, T0)).toBeNull();
+    expect(orbitsLine({ ...all(), satellites: [], unavailable: [{ id: 25544, name: "ISS", reason: "x", kind: "failed" }] }, [], undefined, T0)).toBeNull();
   });
 });
 

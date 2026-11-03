@@ -7,7 +7,9 @@
  * describes, which is what limits SGP4's accuracy), not from when it was saved; older copies are dropped.
  */
 
-import type { Envelope, SatelliteElements, SatellitesData } from "../../shared/contract";
+import type { Envelope, Notice, SatelliteElements, SatellitesData, UpstreamCall } from "../../shared/contract";
+import { listNames, SATELLITE_LIST } from "../../shared/spacecraft";
+import { ApiError, isRateLimited } from "../core/api";
 import { age } from "../core/format";
 
 export const SAVED_ELEMENTS_KEY = "sky:elements";
@@ -75,9 +77,9 @@ export interface Filled {
 
 /**
  * Fills in spacecraft the server couldn't load from this browser's copies. `data` null means the whole
- * request failed: everything usable in the store is used (null if nothing is). Objects CelesTrak answered
- * for without elements (`kind: "missing"`) are left as they are; a copy the server saved is replaced by
- * a newer one from this browser.
+ * request failed: everything usable in the store is used (null if nothing is), and the listed spacecraft
+ * without a copy are `unavailable` (kind "failed"). Objects CelesTrak answered for without elements
+ * (`kind: "missing"`) are left as they are; a copy the server saved is replaced by a newer one from this browser.
  */
 export function fillFromSaved(data: SatellitesData | null, store: SavedStore, now: number): Filled | null {
   const usable = (id: number) => {
@@ -87,7 +89,11 @@ export function fillFromSaved(data: SatellitesData | null, store: SavedStore, no
   if (!data) {
     const satellites = Object.values(store).map((s) => s.el).filter((el) => savedUsable(el, now));
     if (!satellites.length) return null;
-    return { data: { satellites, unavailable: [], staleAfterDays: STALE_AFTER_DAYS }, fromBrowser: satellites.map((s) => s.id) };
+    const have = new Set(satellites.map((s) => s.id));
+    const unavailable: SatellitesData["unavailable"] = SATELLITE_LIST.filter((s) => !have.has(s.id)).map((s) => ({
+      id: s.id, name: s.name, reason: "No saved orbit from the last few days.", kind: "failed",
+    }));
+    return { data: { satellites, unavailable, staleAfterDays: STALE_AFTER_DAYS }, fromBrowser: satellites.map((s) => s.id) };
   }
   const fromBrowser: number[] = [];
   const satellites = data.satellites.map((s) => {
@@ -117,15 +123,26 @@ export function newestSavedAt(store: SavedStore, ids: number[]): string | null {
   return times.length ? new Date(Math.max(...times.map((t) => Date.parse(t)))).toISOString() : null;
 }
 
+/** Why the passes section's orbits aren't all fresh, as the start of its one-line note. */
+export const CELESTRAK_DIDNT_ANSWER = "CelesTrak didn’t answer";
+
 /**
- * The passes section's plain note for a spacecraft predicted from a saved copy, e.g. "Hubble: orbit from 5 h ago
- * (saved in this browser), CelesTrak didn’t answer." Null when its elements are fresh.
+ * The passes section's one neutral line when CelesTrak (or the request) failed for some spacecraft but
+ * at least one can still be predicted, e.g. "CelesTrak didn’t answer; using saved orbits: ISS (17 h old),
+ * Tiangong (16 h old). Hubble: no saved orbit." Ages count from each orbit's epoch (what limits the
+ * prediction). `lead` says what failed. Null when every orbit is fresh, or nothing can be predicted (the
+ * section then shows its error box). Never contains an upstream error: those stay in the request log.
  */
-export function savedCopyNote(sat: SatelliteElements, fromBrowser: boolean, wholeLoadFailed: boolean, now = Date.now()): string | null {
-  const where = fromBrowser ? "saved in this browser" : sat.saved ? "saved by this site’s server" : null;
-  if (!where) return null;
-  const why = wholeLoadFailed ? "the latest orbits couldn’t be loaded" : "CelesTrak didn’t answer";
-  return `${sat.name}: orbit from ${age(sat.epoch, now)} ago (${where}), ${why}.`;
+export function orbitsLine(data: SatellitesData, fromBrowser: readonly number[], lead = CELESTRAK_DIDNT_ANSWER, now = Date.now()): string | null {
+  if (!data.satellites.length) return null;
+  const mine = new Set(fromBrowser);
+  const saved = data.satellites.filter((s) => mine.has(s.id) || s.saved).map((s) => `${s.name} (${age(s.epoch, now)} old)`);
+  const none = data.unavailable.filter((u) => u.kind !== "missing").map((u) => u.name);
+  if (saved.length) {
+    return `${lead}; using saved orbits: ${saved.join(", ")}.${none.length ? ` ${listNames(none)}: no saved orbit.` : ""}`;
+  }
+  if (none.length) return `${lead} for ${listNames(none)}, and there’s no saved orbit for ${none.length > 1 ? "them" : "it"}.`;
+  return null;
 }
 
 /** Where the store lives: src/core/storage.ts in the panel, a Map in tests. */
@@ -161,4 +178,75 @@ export async function loadElements(
     const filled = fillFromSaved(null, candidates, now);
     return { ok: false, error, data: filled?.data ?? null, fromBrowser: filled?.fromBrowser ?? [], fetchedAt: filled ? newestSavedAt(candidates, filled.fromBrowser) : null };
   }
+}
+
+/** The sky panel's data (src/panels/sky.ts). */
+export interface SkyData {
+  /** Spacecraft orbital elements (CelesTrak), or null until the visitor loads them. */
+  satellites: SatellitesData | null;
+  /**
+   * Why the last load of the elements failed (the rest of the panel keeps working). `message` is shown only
+   * when no spacecraft can be predicted at all; otherwise `lead` (what failed, e.g. "CelesTrak didn’t answer")
+   * starts the passes section's one-line note about the saved orbits used. Optional: older snapshots lack it.
+   */
+  error: { message: string; hint: string | null; lead?: string } | null;
+  /**
+   * Spacecraft whose elements come from this browser's saved copy (this file) because the
+   * server couldn't load them this time. Optional: snapshots from before 2026-11-03 don't have it.
+   */
+  fromBrowser?: number[];
+}
+
+/** The header's text while saved copies stand in for CelesTrak for at least one spacecraft. */
+export const SAVED_STAMP = "Using saved orbits";
+
+/** The sky panel's load() result (a PanelResult<SkyData>, src/core/panel.ts). */
+export interface OrbitsResult {
+  data: SkyData;
+  fetchedAt: string;
+  upstream: UpstreamCall[];
+  notices: Notice[];
+  failed?: string;
+  stamp?: string;
+}
+
+/**
+ * What the panel shows for a load of the elements. Saved copies covering at least one spacecraft make the
+ * header say "Using saved orbits" (SAVED_STAMP) instead of "failed", and the passes section one neutral
+ * line (orbitsLine); a failed request still sets `failed`, so "Refresh all" counts it. Upstream errors
+ * (e.g. "answered HTTP 522") stay in the request log; `error.message` is shown only when nothing can be predicted.
+ */
+export function orbitsResult(out: ElementsOutcome, now = Date.now()): OrbitsResult {
+  const usesSaved = (data: SatellitesData | null) => !!data && (out.fromBrowser.length > 0 || data.satellites.some((s) => s.saved));
+  if (out.ok) {
+    const env = out.envelope;
+    return {
+      data: { satellites: out.data, error: null, fromBrowser: out.fromBrowser },
+      fetchedAt: env.fetchedAt,
+      upstream: env.upstream,
+      // The passes section says which orbits failed or are saved copies in its one line, so the Worker's
+      // warnings about them (the only warnings this source sends) aren't repeated above the panel.
+      notices: env.notices.filter((n) => n.level !== "warning"),
+      ...(usesSaved(out.data) ? { stamp: SAVED_STAMP } : {}),
+    };
+  }
+  const err = out.error;
+  const api = err instanceof ApiError ? err : null;
+  const rateLimited = isRateLimited(err);
+  /** The Worker answered for this source: CelesTrak (or its saved copies) failed, not the connection. */
+  const fromCelestrak = !rateLimited && api?.body?.source === "satellites" && api.body.error.kind !== "internal";
+  const message = rateLimited
+    ? "Too many requests to this site; try again in a minute."
+    : fromCelestrak
+      ? `${api!.message} No saved orbits from the last ${SAVED_MAX_AGE_DAYS} days are available.`
+      : (api?.message ?? (err as Error)?.message ?? "Unknown error.");
+  const lead = rateLimited ? "Too many requests to this site" : fromCelestrak ? CELESTRAK_DIDNT_ANSWER : "The latest orbits couldn’t be loaded";
+  return {
+    data: { satellites: out.data, error: { message, hint: api?.body?.error.hint ?? null, lead }, fromBrowser: out.fromBrowser },
+    fetchedAt: out.fetchedAt ?? new Date(now).toISOString(),
+    upstream: api?.body?.upstream ?? [],
+    notices: [],
+    failed: "Spacecraft orbits failed — see below",
+    ...(out.data?.satellites.length ? { stamp: SAVED_STAMP } : {}),
+  };
 }

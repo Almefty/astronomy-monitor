@@ -1,6 +1,6 @@
 import { json2satrec, jday, propagate, sgp4, shadowFraction, sunPos, twoline2satrec, SatRecError } from "satellite.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Envelope, SatelliteElements, SatellitesData } from "../shared/contract";
+import type { ApiErrorBody, Envelope, SatelliteElements, SatellitesData } from "../shared/contract";
 import { compassPoint, nightEvents, nightWindow, skyPosition, sunVectorOfDate, type Observer } from "../shared/sky";
 import {
   darkIntervals, estimateMagnitude, inEarthShadow, MIN_ALTITUDE, passesAboveHorizon, passSearchWindow, predictPasses,
@@ -9,7 +9,9 @@ import {
 import { canonicalApiPath, handleApi } from "../worker/api";
 import type { Env } from "../worker/lib/env";
 import { SOURCES } from "../worker/sources/index";
-import { FAILURE_MAX_AGE, INTERNAL_GP_PATH, ommEpochMs, REQUEST_TIMEOUT_MS, SATELLITE_LIST, SAVED_MAX_AGE_DAYS, slimOmm, STALE_AFTER_DAYS } from "../worker/sources/satellites";
+import {
+  FAILURE_MAX_AGE, INTERNAL_GP_PATH, ommEpochMs, REQUEST_TIMEOUT_MS, SATELLITE_LIST, SAVED_MAX_AGE_DAYS, slimOmm, STALE_AFTER_DAYS, totalFailureMessage,
+} from "../worker/sources/satellites";
 import ref from "./fixtures/satellites-reference.json";
 import vallado from "./fixtures/sgp4-vallado.json";
 
@@ -147,6 +149,20 @@ describe("CelesTrak elements (Worker)", () => {
     expect(res.headers.get("cache-control")).toBe("public, max-age=600");
     // One request per object, never a retry.
     expect(asked.sort()).toEqual([20580, 25544, 48274]);
+    // The message names every spacecraft, not the first failure; each call's status is in the request log.
+    const body = (await res.json()) as ApiErrorBody;
+    expect(body.error).toEqual({ kind: "upstream", message: "Orbits for ISS, Tiangong and Hubble couldn’t be loaded from CelesTrak." });
+    expect(body.upstream.map((c) => [c.name, c.status, c.ok])).toEqual([
+      ["CelesTrak GP elements (ISS)", 503, false], ["CelesTrak GP elements (Tiangong)", 503, false], ["CelesTrak GP elements (Hubble)", 503, false],
+    ]);
+  });
+
+  it("names every spacecraft when none could be loaded, failed or without elements", () => {
+    expect(totalFailureMessage(["ISS", "Hubble"], ["Tiangong"])).toBe(
+      "Orbits for ISS and Hubble couldn’t be loaded from CelesTrak. CelesTrak has no usable orbital elements for Tiangong right now.",
+    );
+    expect(totalFailureMessage([], ["ISS", "Tiangong", "Hubble"])).toBe("CelesTrak has no usable orbital elements for ISS, Tiangong and Hubble right now.");
+    expect(totalFailureMessage([], [])).toBe("CelesTrak returned no usable orbital elements.");
   });
 
   it("serves the objects that loaded with a warning when one request fails, cached briefly", async () => {
